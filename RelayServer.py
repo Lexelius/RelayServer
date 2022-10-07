@@ -85,14 +85,17 @@ def RelayServer(det_host, det_port, pos_host, pos_port, relay_host, relay_port):
         if relay_socket in ready_sockets:
             # Expects a request of the form: ['check/load', {'frame': int, '**kwargs': value}]
             request = relay_socket.recv_json()
+            print(f'request = {request}')
             if request[0] == 'check':
                 print('check')
                 if nr_of_check_replies == 0 and Energy != None:
+                    print('inside REQ1') ### DEBUG
                     relay_socket.send_json(
                             {'energy': Energy, 'latest_pos_index_received': latest_pos_index_received, 'latest_det_index_received': latest_det_index_received,
                              'recieved_image_indices': recieved_image_indices})
                     nr_of_check_replies += 1
                 else:
+                    print('inside REQ2')  ### DEBUG
                     # nr of images:
                     if len(recieved_image_indices) != latest_det_index_received + 1:  ## "+1" Because counting starts on 0
                         im_acc = len(recieved_image_indices)
@@ -100,17 +103,28 @@ def RelayServer(det_host, det_port, pos_host, pos_port, relay_host, relay_port):
                     else:
                         im_acc = latest_det_index_received + 1
                     # nr of positions:
-                    frames_accessible_tot = np.min(im_acc,
+                    frames_accessible_tot = min(im_acc,
                                                    latest_pos_index_received + 1)  # Just sending total nr of frames accessible, even if some of them have already been sent
-                    relay_socket.send_json([frames_accessible_tot, end_of_scan and end_of_det_stream])
+                    print(f'sending [int(frames_accessible_tot), end_of_scan and end_of_det_stream] = {[int(frames_accessible_tot), end_of_scan and end_of_det_stream]}') ### DEBUG
+                    relay_socket.send_json([int(frames_accessible_tot), end_of_scan and end_of_det_stream])
                     nr_of_check_replies += 1
             elif request[0] == 'load':
                 print('load')
                 frame_nr = request[1]['frame']
+                print(f'frame_nr = {frame_nr},    type = {type(frame_nr)}')  ### DEBUG
                 # Take account for lost images and fix the indices
-                paired_pos_ind = np.array(recieved_pos_indices)[recieved_image_indices]
-                all_msg_send = all_msg[paired_pos_ind]
-                relay_socket.send_json({'pos': all_msg_send[frame_nr], 'img': all_img[frame_nr]})  ## ToDo: Find the best method to send reply with
+                paired_pos_ind = np.array(recieved_pos_indices)[recieved_image_indices] ### IndexError: index 45 is out of bounds for axis 0 with size 4
+                print(f'paired_pos_ind = {paired_pos_ind},    type = {type(paired_pos_ind)}')  ### DEBUG
+                print(f'type(all_msg) = {type(all_msg)}')  ### DEBUG
+                all_msg_send = np.array(all_msg)[paired_pos_ind]
+                print(f'type(all_msg_send[frame_nr]) = {type(all_msg_send[frame_nr])}')  ### DEBUG
+                print(f'type(np.array(all_img)[frame_nr]) = {type(np.array(all_img)[frame_nr])}')  ### DEBUG
+                print(f'type(all_img) = {type(all_img)}')  ### DEBUG
+                print(f'type(all_img[frame_nr]) = {type(all_img[frame_nr])}')  ### DEBUG, TypeError: list indices must be integers or slices, not list
+                print(f'')  ### DEBUG
+                ## ToDo: Find the best method to send reply with
+                # relay_socket.send_json({'pos': all_msg_send[frame_nr], 'img': all_img[frame_nr]}) ### TypeError: list indices must be integers or slices, not list
+                relay_socket.send_json({'pos': all_msg_send[frame_nr], 'img': np.array(all_img)[frame_nr]}) ### TypeError: Object of type ndarray is not JSON serializable
 
         if det_socket in ready_sockets:
             i += 1
