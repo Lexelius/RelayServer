@@ -58,7 +58,7 @@ dct_first = {'filename': scan_fname, 'htype': 'header', 'msg_number': k}
 t1 = time.time()
 print(f'Prepping the eiger simulator took {t1-t0:.04f} s.') ## 1.0029 s
 print(f'Starting at time {time.strftime("%H:%M:%S", time.localtime())}')
-det_socket.send_json(dct_first, flags=zmq.SNDMORE)
+det_socket.send_json(dct_first)
 time.sleep(0.2)
 while True:
 	i += 1
