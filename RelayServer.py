@@ -1,6 +1,7 @@
 import json
 import zmq
 from bitshuffle import decompress_lz4
+from bitshuffle import compress_lz4
 import numpy as np
 import select
 import time
@@ -10,9 +11,6 @@ import struct
 
 import subprocess
 import sys
-
-## ToDo: figure out why it skips recieving 1st eiger frame!
-## Try if using the load balancing pattern and ROUTER/DEALER sockets solves the problem.
 
 
 
@@ -89,8 +87,7 @@ class RelayServer(object):
                         if self.nr_of_check_replies == 0 and self.Energy != None:
                             print('inside REQ1') ### DEBUG
                             self.relay_socket.send_json(
-                                    {'energy': self.Energy, 'self.latest_pos_index_received': self.latest_pos_index_received, 'self.latest_det_index_received': self.latest_det_index_received,
-                                     'self.recieved_image_indices': self.recieved_image_indices})
+                                    {'energy': float(self.Energy), 'self.latest_pos_index_received': int(self.latest_pos_index_received), 'self.latest_det_index_received': int(self.latest_det_index_received)}) ##, 'self.recieved_image_indices': self.recieved_image_indices})
                             self.nr_of_check_replies += 1
                         else:
                             print('inside REQ2')  ### DEBUG
@@ -108,21 +105,19 @@ class RelayServer(object):
                             self.nr_of_check_replies += 1
                     elif request[0] == 'load':
                         print('load')
-                        frame_nr = request[1]['frame']
-                        print(f'frame_nr = {frame_nr},    type = {type(frame_nr)}')  ### DEBUG
-                        # Take account for lost images and fix the indices
-                        paired_pos_ind = np.array(self.recieved_pos_indices)[self.recieved_image_indices] ### IndexError: index 45 is out of bounds for axis 0 with size 4
-                        print(f'paired_pos_ind = {paired_pos_ind},    type = {type(paired_pos_ind)}')  ### DEBUG
-                        print(f'type(self.all_msg) = {type(self.all_msg)}')  ### DEBUG
-                        self.all_msg_send = np.array(self.all_msg)[paired_pos_ind]
-                        print(f'type(self.all_msg_send[frame_nr]) = {type(self.all_msg_send[frame_nr])}')  ### DEBUG
-                        print(f'type(np.array(self.all_img)[frame_nr]) = {type(np.array(self.all_img)[frame_nr])}')  ### DEBUG
-                        print(f'type(self.all_img) = {type(self.all_img)}')  ### DEBUG
-                        print(f'type(self.all_img[frame_nr]) = {type(self.all_img[frame_nr])}')  ### DEBUG, TypeError: list indices must be integers or slices, not list
-                        print(f'')  ### DEBUG
-                        ## ToDo: Find the best method to send reply with
-                        # self.relay_socket.send_json({'pos': self.all_msg_send[frame_nr], 'img': self.all_img[frame_nr]}) ### TypeError: list indices must be integers or slices, not list
-                        self.relay_socket.send_json({'pos': self.all_msg_send[frame_nr], 'img': np.array(self.all_img)[frame_nr]}) ### TypeError: Object of type ndarray is not JSON serializable
+                        self.frame_nr = request[1]['frame']
+                        # Get the correct indices corresponding to the requested frame_nr
+                        frame_msg_ind = np.array(self.recieved_pos_indices)[self.frame_nr]
+                        frame_img_ind = np.array(self.recieved_image_indices)[self.frame_nr]
+                        sendmsg = np.array(self.all_msg)[frame_msg_ind]
+                        sendimg = np.array(self.all_img)[frame_img_ind]
+                        sendmsg[0]['dtype'] = sendimg[0].dtype  # Used for decompressing image in LS
+                        sendmsg[0]['shape'] = sendimg.shape  # Used for decompressing image in LS
+                        self.relay_socket.send_pyobj(sendmsg, flags=zmq.SNDMORE)
+                        self.relay_socket.send(compress_lz4(sendimg), copy=True)
+                    elif request[0] == 'stop':
+                        self.relay_socket.send_json(['closing connection to relay_socket'])
+                        self.stop_outstream()
 
                 if self.det_socket in ready_sockets:
                     i += 1
@@ -193,21 +188,28 @@ class RelayServer(object):
 
             except KeyboardInterrupt:
                 self.stop()
+                self.stop_outstream()
 
             except Exception as err:
-                print(err)
+                print('Error: ', err)
                 self.stop()
+                self.stop_outstream()
 
 
     def stop(self):
    # if self.end_of_scan and self.end_of_det_stream:
-        print(f'Last diffraction pattern and positions received at {time.strftime("%H:%M:%S", time.localtime())}, will close self.det_socket, self.pos_socket, and self.relay_socket!')
+        print(f'Last diffraction pattern and positions received at {time.strftime("%H:%M:%S", time.localtime())}, will close self.det_socket, self.pos_socket!')
         self.det_socket.close()
         self.pos_socket.close()
-        self.relay_socket.close()  # ToDo: Fix to end only after sending last frame
-        self.running = False
+        ##self.relay_socket.close()  # ToDo: Fix to end only after sending last frame
+        ##self.running = False
         # return self.all_parts, self.all_info_json, self.all_info, self.all_img, self.all_msg, self.latest_posimg_index_received
 
+
+    def stop_outstream(self):
+        print(f'Closing the relay_socket at {time.strftime("%H:%M:%S", time.localtime())}!')
+        self.relay_socket.close()
+        self.running = False
 
 
 if __name__ == "__main__":
@@ -222,8 +224,8 @@ if __name__ == "__main__":
     ### self.all_parts, self.all_info_json, self.all_info, self.all_img, self.all_msg, self.latest_posimg_index_received = RelayServer(det_host, det_port, pos_host, pos_port, relay_host, relay_port)
     RS.run()
 
-    # pubout = self.runpub.communicate()[0].decode().split('\n')
-    # pushout = self.runpush.communicate()[0].decode().split('\n')
+    #pubout = RS.runpub.communicate()[0].decode().split('\n')
+    #pushout = RS.runpush.communicate()[0].decode().split('\n')
 
 """
 To do:
