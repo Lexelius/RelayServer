@@ -1,4 +1,4 @@
-from RelayServer import RelayServer as RS
+from RelayServer import RelayServer
 import numpy as np
 import pytest
 
@@ -13,19 +13,23 @@ diff = np.ones((10, 7, 5)) * np.arange(1, 36).reshape((7, 5))
 #     (np.arange(-2, 3), False, 'expected')
 # ])
 @pytest.mark.parametrize("diff, get_weights", [
-    (diff, True),
-    (diff, False)
+    (np.ones((10, 7, 5)) * np.arange(1, 36).reshape((7, 5)), True)# ,
+    # (diff, False)
 ])
 def test_crop(diff, get_weights): #, expected):
     # return diff_croppad, c_a, padwidth
     # self.init_params['shape']
     # self.init_params['center']
     # self.center
+    RS = RelayServer()
     RS.init_params['shape'] = (7, 7)
     RS.init_params['center'] = (2, 1)
-    diff[:, RS.init_params['center']] = 1000
-    diff_croppad, c_a, padwidth = RS.crop(diff, get_weights=False)
-    assert diff_croppad[c_a] == 1000
+    #print(diff)
+    diff[:, RS.init_params['center'][0], RS.init_params['center'][1]] = 1000
+    print(diff)
+    diff_croppad, c_a, padwidth = RelayServer.crop(RS, diff, get_weights=False)
+    print(c_a, c_a.shape, type(c_a))
+    assert (diff_croppad[:, c_a[0], c_a[1]] == 1000).all()
     #assert (RS.crop(diff, get_weights=False) == expected).all()
 
 
