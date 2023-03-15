@@ -20,18 +20,55 @@ class RelayServer(object):
 
     recieved_image_indices: List[Any]
 
-    def __init__(self, detector_address, motors_address, relay_address, simulate):
+    def __init__(self):
+        """ Declares necessary variables. """
         print('start')
         self.t0 = time.time()
+        # if simulate == True:
+        #         self.runpub = subprocess.Popen([sys.executable, '/home/reblex/RelayServer/Simulators/Motor_streamer.py'],
+        #                                   stdout=subprocess.PIPE,
+        #                                   stderr=subprocess.STDOUT)
+        #         self.runpush = subprocess.Popen([sys.executable, '/home/reblex/RelayServer/Simulators/Detector_streamer.py'],
+        #                                    stdout=subprocess.PIPE,
+        #                                    stderr=subprocess.STDOUT)
+
+        # Initialize parameters
+        self.running = True
+        self.latest_pos_index_received = -1
+        self.latest_det_index_received = -1  # Counting every received image, assumes they come in the correct order and that no images are lost
+        self.end_of_scan = False
+        self.end_of_det_stream = False
+
+        self.all_img = {}
+        self.all_msg = {}
+        self.Energy = None
+        self.recieved_image_indices = []  # List of received frame indices, read from detector messages
+        self.recieved_pos_indices = []
+        self.latest_posimg_index_received = []
+        self.nr_of_check_replies = 0
+        self.energy_replied = False
+        self.load_replies = 0
+        self.init_params = {}
+        self.do_crop = None
+        self.center = None
+        self.newcenter = None
+        self.sendimg = []
+
+    def connect(self, detector_address, motors_address, relay_address, simulate):
+        """
+        Initiates the connections and binding of the sockets.
+        Starts simulating an ongoing experiment in new processes
+        if 'simulate' is set to True.
+
+        Parameters
+        ----------
+        detector_address : str
+        motors_address : str
+        relay_address : str
+        simulate : bool
+
+        """
         print(f'Starting Relay server, reading from detector address {detector_address} and positions address {motors_address}')
-        if simulate == True:
-                self.runpub = subprocess.Popen([sys.executable, '/home/reblex/RelayServer/Simulators/Motor_streamer.py'],
-                                          stdout=subprocess.PIPE,
-                                          stderr=subprocess.STDOUT)
-                self.runpush = subprocess.Popen([sys.executable, '/home/reblex/RelayServer/Simulators/Detector_streamer.py'],
-                                           stdout=subprocess.PIPE,
-                                           stderr=subprocess.STDOUT)
-    
         context = zmq.Context()
         self.det_socket = context.socket(zmq.PULL)
         self.det_socket.connect(detector_address)  ## ('tcp://b-daq-node-2:20001')
@@ -43,33 +80,20 @@ class RelayServer(object):
         self.relay_socket = context.socket(zmq.REP)
         self.relay_socket.bind(relay_address)
 
-        # Initialize parameters
-        self.running = True
-        self.latest_pos_index_received = -1
-        self.latest_det_index_received = -1  # Counting every received image, assumes they come in the correct order and that no images are lost
-        self.end_of_scan = False
-        self.end_of_det_stream = False
-        self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] == 'tcp://p-daq-cn-2'##'tcp://b-daq-node-2' ## used to determine how to decompress images
-        ### self.all_parts = []
-        ### self.all_info_json = []
+        # Start simulating an ongoing experiment
+        if simulate == True:
+                self.runpub = subprocess.Popen([sys.executable, '/home/reblex/RelayServer/Simulators/Motor_streamer.py'],
+                                          stdout=subprocess.PIPE,
+                                          stderr=subprocess.STDOUT)
+                self.runpush = subprocess.Popen([sys.executable, '/home/reblex/RelayServer/Simulators/Detector_streamer.py'],
+                                           stdout=subprocess.PIPE,
+                                           stderr=subprocess.STDOUT)
 
-        ### self.all_info = []
-        self.all_img = {} #%#
-        self.all_msg = {} #%#
-        self.Energy = None
-        self.recieved_image_indices = []  # List of received frame indices, read from detector messages
-        self.recieved_pos_indices = []
-        self.latest_posimg_index_received = []
-        self.nr_of_check_replies = 0
-        self.energy_replied = False
-        self.load_replies = 0
-        self.init_params = {} #!#
-        self.do_crop = None #!#
-        self.center = None
-        self.newcenter = None
-        self.sendimg = []
+        self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] == 'tcp://p-daq-cn-2'##'tcp://b-daq-node-2' ## used to determine how to decompress images
+
 
     def run(self):
+        # ToDO: Add some assertion/check that sockets have been connected before continuing from here.
         i = -1
         j = -1
         while self.running:
@@ -254,7 +278,7 @@ class RelayServer(object):
 
         if self.center is None:
             ##if 'center' in self.init_params.keys() and not isinstance(self.init_params['center'], str):
-            if 'center' in self.init_params.keys() and  isinstance(self.init_params['center'], (list, tuple)):
+            if 'center' in self.init_params.keys() and isinstance(self.init_params['center'], (list, tuple)):
                 c_d = np.array(self.init_params['center'])  ## cy, cx : row, col  ### [751, 343]
             else:
                 c_d = np.rint(self.find_center('all', 'auto')).astype(int)
@@ -361,7 +385,9 @@ if __name__ == "__main__":
     src = known_sources['Simulator']
     relay_adr = 'tcp://127.0.0.1:45678'
 
-    RS = RelayServer(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True)
+    # RS = RelayServer(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True)
+    RS = RelayServer()
+    RS.connect(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True)
     RS.run()
 
     #pubout = RS.runpub.communicate()[0].decode().split('\n')
