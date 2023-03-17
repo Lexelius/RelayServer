@@ -1,91 +1,118 @@
 from RelayServer import RelayServer
 import numpy as np
 import pytest
+import sys
+import subprocess
+import time
 
 print('Starting tests')
 
-diff = np.ones((10, 7, 5)) * np.arange(1, 36).reshape((7, 5))
 
-
-
-# @pytest.mark.parametrize("diff, get_weights, expected", [
-#     (np.arange(-2, 3), True, 'expected'),
-#     (np.arange(-2, 3), False, 'expected')
-# ])
 @pytest.mark.parametrize("diff, get_weights", [
-    (np.ones((10, 7, 5)) * np.arange(1, 36).reshape((7, 5)), True)# ,
-    # (diff, False)
-])
-def test_crop(diff, get_weights): #, expected):
-    # return diff_croppad, c_a, padwidth
-    # self.init_params['shape']
-    # self.init_params['center']
-    # self.center
+    (np.ones((10, 7, 5)) * np.arange(1, 36).reshape((7, 5)), False)
+    ])
+def test_crop(diff, get_weights):
     RS = RelayServer()
     RS.init_params['shape'] = (7, 7)
     RS.init_params['center'] = (2, 1)
-    #print(diff)
     diff[:, RS.init_params['center'][0], RS.init_params['center'][1]] = 1000
-    print(diff)
-    diff_croppad, c_a, padwidth = RelayServer.crop(RS, diff, get_weights=False)
-    print(c_a, c_a.shape, type(c_a))
+    diff_croppad, c_a, padwidth = RelayServer.crop(RS, diff, get_weights=get_weights)
     assert (diff_croppad[:, c_a[0], c_a[1]] == 1000).all()
-    #assert (RS.crop(diff, get_weights=False) == expected).all()
 
 
+#%% try creating the test using fixture
 
-#%% Old test function I made
-"""
-def croptst( diff, cropshape, center):
+@pytest.fixture
+def RS_instance():
+    RS = RelayServer()
+    RS.init_params['shape'] = (7, 7)
+    RS.init_params['center'] = (2, 1)
+    return RS
 
-    # [cropshape] type: int, tuple
-    # [center] type: np.array()
 
-    # a: desired crop shape, b: resulting crop shape, c: center , d: diff shape
-    cropshape = np.min(cropshape)
-    c_d = center
+@pytest.fixture(params=[[(7, 7), (2, 1)],
+                        [(5, 5), (1, 2)],
+                        [(3, 3), (0, 2)],
+                        [(7, 7), (2, 3)],
+                        [(5, 5), (3, 3)],
+                        [(5, 5), (3, 1)],
+                        [(7, 7), (4, 1)],
+                        [(3, 3), (6, 2)],
+                        [(5, 5), (5, 2)],
+                        [(7, 7), (4, 3)]]
+                )
+def RS_diff_opts(request):
+    print('\n', '_'.ljust(70, '_'))
+    sh, cen = request.param
+    RS = RelayServer()
+    RS.init_params['shape'] = sh
+    RS.init_params['center'] = cen
+    diff = np.ones((10, 7, 5)) * np.arange(1, 36).reshape((7, 5))
+    print(f'\nRS_diff_opts: \t\t sh = {sh},\t cen = {cen}')
+    print('\ndiff[0] 1: \n', diff[0])
+    diff[:, RS.init_params['center'][0], RS.init_params['center'][1]] = 1000
+    print('\ndiff[0] 2: \n', diff[0])
+    return RS, diff
 
-    # Find limits for cropping
-    d_sh = diff.shape[-2:]  # (rows, cols) (yspan, xspan)
-    a_sh = int(cropshape)
 
-    a_lowlims = c_d - a_sh // 2  # !##  array([367, -41])
-    a_highlims = c_d + (a_sh + 1) // 2  # (a_sh + 1) to enable uneven nr of pixels.
+@pytest.mark.parametrize("get_weights", [False, True])
+def test_crop2(RS_diff_opts, get_weights):
+    print('\n', '-'.ljust(70, '-'), '\n')
+    RS, diff = RS_diff_opts
+    diff_croppad, c_a, padwidth = RS.crop(diff, get_weights)
+    print(f"diff_croppad.shape = {diff_croppad.shape}\nc_a = {c_a},\ttype(c_a) = {type(c_a)}\nget_weights = {get_weights}")
+    print(diff_croppad[:, c_a[0], c_a[1]])
+    print(f"\ndiff[0] = \n {diff[0]}\n\n")
+    print(f"diff_croppad[0] = \n {diff_croppad[0]}\n\n")
+    assert (diff_croppad[:, c_a[0], c_a[1]] == 1000).all()
 
-    # Set the limits within the boundaries of diffraction pattern
-    b_lowlims = np.max((a_lowlims, np.zeros(2, dtype='int')), axis=0)
-    b_highlims = np.min((a_highlims, np.array(d_sh)), axis=0)
-    lims = np.array([b_lowlims, b_highlims])
 
-    ##diff_crop = diff[b_lowlims[0]:b_highlims[0], b_lowlims[1]:b_highlims[1]]
-    diff_crop = np.ascontiguousarray(np.split(np.split(diff, lims[:, 0], axis=-2)[1], lims[:, 1], axis=-1)[1])
+#%%
+def test_RS():
+    """ RS, recon =  test_RS()
+    Test for making sure that the RelayServer closes the connection
+    to PtyPy when PtyPy has registered that all frames have been received.
 
-    ##c_a = np.array([a_sh//2, a_sh//2])
-    c_b = tuple(c_d - b_lowlims)  # center w.r.t cropped diffraction pattern
+    This test does not work yet, since the process will get stuck in RS.run()
+    if RS.relay_socket.closed = False...
 
-    ## adding padding
-    padlims = np.array([b_lowlims - a_lowlims, a_highlims - b_highlims])
-    padwidth = (padlims[:, 0], padlims[:, 1]) ## {sequence, array_like, int}
+    Possible solutions to this:
+        * make a timeout for how long RS.run has been running and if it takes too long then make the test fail
+        * see how to check if a subprocess has exited, and put RS.run into a separate process as well,
+        then if recon has exited but not RS.run then fail the test!
+    """
+    recon = subprocess.Popen([sys.executable, '/home/reblex/Documents/Scripts/Reconstruct_livescan_siemens_KB.py'],
+                     stdout=subprocess.PIPE,
+                     stderr=subprocess.STDOUT)
 
-    padwidth = np.zeros((len(diff.shape),2), dtype='int64') # Used to get the correct shape for padwidth in np.pad
-    #padwidth[-2:,:] = np.array([b_lowlims - a_lowlims, a_highlims - b_highlims])
-    padwidth[-2:, :] = np.array([(padlims[:, 0], padlims[:, 1])])
-    diff_croppad = np.pad(diff_crop, padwidth)
+    import os
+    # RS = RelayServer()
+    # RS.connect(detector_address='tcp://0.0.0.0:56789', motors_address='tcp://127.0.0.1:5556', relay_address='tcp://127.0.0.1:45678', simulate=True)
+    RSrun = subprocess.Popen([sys.executable, "-c",
+                         "import os;"
+                         f"os.chdir(os.path.dirname(f'{os.path.abspath(__file__)}'));"
+                         "from RelayServer import RelayServer;"
+                         "RS = RelayServer();"
+                         "RS.connect(detector_address='tcp://0.0.0.0:56789', motors_address='tcp://127.0.0.1:5556', relay_address='tcp://127.0.0.1:45678', simulate=True);"
+                         "RS.run()"
+                         ],
+                 stdout=subprocess.PIPE,
+                 stderr=subprocess.STDOUT)
+    # retcode = None
+    # while retcode is None:
+    #     time.sleep(0.5)
+    #     retcode = recon.poll()
+    #     print(retcode, recon.communicate()[0].decode().split('\n'))
+    recon.wait(40)
+    print(recon.communicate()[0].decode().split('\n'))
+    print(RSrun.communicate()[0].decode().split('\n'))
+    print(os.path.dirname(os.path.abspath(__file__)))
 
-    return diff_croppad, diff_crop, c_b, c_d, d_sh, a_sh, a_lowlims, a_highlims, b_lowlims, b_highlims, lims, padlims
+    assert recon.returncode == 0
+    if recon.returncode == 0:
+        assert RSrun.returncode == 0
+    # if 'End of scan reached' in recon.communicate()[0].decode().split('\n'):
+    #     assert RS.relay_socket.closed
 
-from tabulate import tabulate
-centers = [(2,1), (1,2), (0,2), (2,3), (3,3), (3,1), (4,1), (6,2), (5,2), (4,3)]
-shapes = [(7,7), (5,5), (3,3), (7,7), (5,5), (5,5), (7,7), (3,3), (5,5), (7,7)]
-for k in range(len(centers)):
-    c1 = centers[k]
-    A1 = np.arange(35).reshape((7,5))
-    A1[c1] = 1000
-    A1 = np.array([A1, A1, A1, A1, A1, A1])
-    diff_croppad, diff_crop, c_b, c_d, d_sh, a_sh, a_lowlims, a_highlims, b_lowlims, b_highlims, lims, padlims = croptst(A1, shapes[k], np.array(c1))
-    print(tabulate([[k, '\tcenter: ', c1, ', shape: ', shapes[k], 'blims: ', lims, 'alims: ', np.array([a_lowlims, a_highlims]), 'padlims: ', padlims]]))
-    print(diff_croppad, '\n')
-    #print(k, 'center: ', c1, ', shape: ', shapes[k], 'diff_croppad: \n', diff_croppad, '\n\n')
-    #print('A1:\n', A1, '\ndiff_crop:\n', diff_crop, '\ndiff_croppad:\n', diff_croppad)
-##diff_croppad, diff_crop, c_b, c_d, d_sh, a_sh, a_lowlims, a_highlims, b_lowlims, b_highlims, lims, padlims = croptst(RS.all_img[0], self.init_params['shape'], self.center)
-"""
+
+#%%
