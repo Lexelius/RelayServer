@@ -13,6 +13,7 @@ import struct
 
 import subprocess
 import sys
+import os
 from ptypy import utils as u
 
 
@@ -22,7 +23,6 @@ class RelayServer(object):
 
     def __init__(self):
         """ Declares necessary variables. """
-        print('start')
         self.t0 = time.time()
         # if simulate == True:
         #         self.runpub = subprocess.Popen([sys.executable, '/home/reblex/RelayServer/Simulators/Motor_streamer.py'],
@@ -81,11 +81,12 @@ class RelayServer(object):
         self.relay_socket.bind(relay_address)
 
         # Start simulating an ongoing experiment
-        if simulate == True:
-                self.runpub = subprocess.Popen([sys.executable, '/home/reblex/RelayServer/Simulators/Motor_streamer.py'],
+        RS_path = os.path.dirname(f'{os.path.abspath(__file__)}')
+        if simulate:
+                self.runpub = subprocess.Popen([sys.executable, RS_path + '/Simulators/Motor_streamer.py'],
                                           stdout=subprocess.PIPE,
                                           stderr=subprocess.STDOUT)
-                self.runpush = subprocess.Popen([sys.executable, '/home/reblex/RelayServer/Simulators/Detector_streamer.py'],
+                self.runpush = subprocess.Popen([sys.executable, RS_path + '/Simulators/Detector_streamer.py'],
                                            stdout=subprocess.PIPE,
                                            stderr=subprocess.STDOUT)
 
