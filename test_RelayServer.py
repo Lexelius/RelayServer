@@ -1,3 +1,7 @@
+"""
+Run with prints to stdout:
+py.test -v --capture=tee-sys /home/reblex/RelayServer/test_RelayServer.py
+"""
 from RelayServer import RelayServer
 import numpy as np
 import pytest
@@ -68,6 +72,21 @@ def test_crop2(RS_diff_opts, get_weights):
 
 
 #%%
+def test_recon():
+    print('\n------------------ test_recon() ------------------')
+    recon = subprocess.Popen([sys.executable, '/home/reblex/Documents/Scripts/Reconstruct_livescan_siemens_KB.py'],
+                             stdout=subprocess.PIPE,
+                             #stdout='/home/reblex/Desktop/temp.log',
+                             # shell=True,
+                             # universal_newlines=True,
+                             stderr=subprocess.STDOUT)
+    print(f'Started reconstruction in subprocess at {time.strftime("%H:%M:%S", time.localtime())}')
+    # time.sleep(10)
+    output = recon.communicate()[0].decode().split('\n')
+    print(output)
+    # recon.wait(10)
+
+
 def test_RS():
     """ RS, recon =  test_RS()
     Test for making sure that the RelayServer closes the connection
@@ -81,13 +100,17 @@ def test_RS():
         * see how to check if a subprocess has exited, and put RS.run into a separate process as well,
         then if recon has exited but not RS.run then fail the test!
     """
+    print('\n------------------ test_RS() ------------------')
     recon = subprocess.Popen([sys.executable, '/home/reblex/Documents/Scripts/Reconstruct_livescan_siemens_KB.py'],
                      stdout=subprocess.PIPE,
-                     stderr=subprocess.STDOUT)
+                     stderr=subprocess.STDOUT,
+                     check=True)
+    print(f'Started reconstruction in subprocess at {time.strftime("%H:%M:%S", time.localtime())}')
 
     import os
     # RS = RelayServer()
     # RS.connect(detector_address='tcp://0.0.0.0:56789', motors_address='tcp://127.0.0.1:5556', relay_address='tcp://127.0.0.1:45678', simulate=True)
+
     RSrun = subprocess.Popen([sys.executable, "-c",
                          "import os;"
                          f"os.chdir(os.path.dirname(f'{os.path.abspath(__file__)}'));"
@@ -97,7 +120,10 @@ def test_RS():
                          "RS.run()"
                          ],
                  stdout=subprocess.PIPE,
-                 stderr=subprocess.STDOUT)
+                 stderr=subprocess.STDOUT,
+                 check=True)
+    print(f'Started RelayServer in subprocess at {time.strftime("%H:%M:%S", time.localtime())}')
+
     # retcode = None
     # while retcode is None:
     #     time.sleep(0.5)
@@ -113,6 +139,10 @@ def test_RS():
         assert RSrun.returncode == 0
     # if 'End of scan reached' in recon.communicate()[0].decode().split('\n'):
     #     assert RS.relay_socket.closed
+
+
+recout = ['Traceback (most recent call last):\n  File "/home/reblex/Documents/Script', 's/Reconstruct_livescan_siemens_KB.py", line 389, in <module>\n    P, t1, ', 't2, t3, t4, t5 = runptycho()\n  File "/home/reblex/Documents/Scripts/Reco', 'nstruct_livescan_siemens_KB.py", line 370, in runptycho\n    P.run()\n  Fi', 'le "/home/reblex/.local/lib/python3.8/site-packages/ptypy/core/ptycho.py", l', 'ine 763, in run\n    self.run(engine=engine)\n  File "/home/reblex/.local/', 'lib/python3.8/site-packages/ptypy/core/ptycho.py", line 670, in run\n    ', 'self.new_data = self.model.new_data()\n  File "/home/reblex/.local/lib/py', 'thon3.8/site-packages/ptypy/core/manager.py", line 1674, in new_data\n   ', ' nd = scan.new_data(_nframes)\n  File "/home/reblex/.local/lib/python3.8/', 'site-packages/ptypy/core/manager.py", line 525, in new_data\n    dp = sel', 'f._get_data(max_frames)\n  File "/home/reblex/.local/lib/python3.8/site-p', 'ackages/ptypy/core/manager.py", line 496, in _get_data\n    dp = self.pty', 'scan.auto(max_frames)\n  File "/home/reblex/.local/lib/python3.8/site-pac', 'kages/ptypy/core/data.py", line 901, in auto\n    msg = self.get_data_chu', 'nk(frames)\n  File "/home/reblex/.local/lib/python3.8/site-packages/ptypy', '/core/data.py", line 654, in get_data_chunk\n    msg = self._mpi_check(ch', 'unksize, start)\n  File "/home/reblex/.local/lib/python3.8/site-packages/', 'ptypy/core/data.py", line 593, in _mpi_check\n    self.frames_accessible,', ' eos = self.check(chunksize, start=s)\n  File "/home/reblex/.local/lib/py', 'thon3.8/site-packages/ptypy/experiment/livescan.py", line 393, in check\n', '    msg = self.socket.recv_json()\n  File "/sw/easybuild/software/IPython', '/7.18.1-GCCcore-10.2.0/lib/python3.8/site-packages/zmq/sugar/socket.py", lin', 'e 689, in recv_json\n    msg = self.recv(flags)\n  File "zmq/backend/cytho', 'n/socket.pyx", line 791, in zmq.backend.cython.socket.Socket.recv\n  File', ' "zmq/backend/cython/socket.pyx", line 827, in zmq.backend.cython.socket.Soc', 'ket.recv\n  File "zmq/backend/cython/socket.pyx", line 186, in zmq.backen', 'd.cython.socket._recv_copy\n  File "zmq/backend/cython/checkrc.pxd", line', ' 13, in zmq.backend.cython.checkrc._check_rc\nKeyboardInterrupt\n']
+recout = 'Traceback (most recent call last):\n  File "/home/reblex/Documents/Script ::s/Reconstruct_livescan_siemens_KB.py", line 389, in <module>\n    P, t1,  ::t2, t3, t4, t5 = runptycho()\n  File "/home/reblex/Documents/Scripts/Reco ::nstruct_livescan_siemens_KB.py", line 370, in runptycho\n    P.run()\n  Fi ::le "/home/reblex/.local/lib/python3.8/site-packages/ptypy/core/ptycho.py", l ::ine 763, in run\n    self.run(engine=engine)\n  File "/home/reblex/.local/ ::lib/python3.8/site-packages/ptypy/core/ptycho.py", line 670, in run\n     ::self.new_data = self.model.new_data()\n  File "/home/reblex/.local/lib/py ::thon3.8/site-packages/ptypy/core/manager.py", line 1674, in new_data\n    :: nd = scan.new_data(_nframes)\n  File "/home/reblex/.local/lib/python3.8/ ::site-packages/ptypy/core/manager.py", line 525, in new_data\n    dp = sel ::f._get_data(max_frames)\n  File "/home/reblex/.local/lib/python3.8/site-p ::ackages/ptypy/core/manager.py", line 496, in _get_data\n    dp = self.pty ::scan.auto(max_frames)\n  File "/home/reblex/.local/lib/python3.8/site-pac ::kages/ptypy/core/data.py", line 901, in auto\n    msg = self.get_data_chu ::nk(frames)\n  File "/home/reblex/.local/lib/python3.8/site-packages/ptypy ::/core/data.py", line 654, in get_data_chunk\n    msg = self._mpi_check(ch ::unksize, start)\n  File "/home/reblex/.local/lib/python3.8/site-packages/ ::ptypy/core/data.py", line 593, in _mpi_check\n    self.frames_accessible, :: eos = self.check(chunksize, start=s)\n  File "/home/reblex/.local/lib/py ::thon3.8/site-packages/ptypy/experiment/livescan.py", line 393, in check\n ::    msg = self.socket.recv_json()\n  File "/sw/easybuild/software/IPython ::/7.18.1-GCCcore-10.2.0/lib/python3.8/site-packages/zmq/sugar/socket.py", lin ::e 689, in recv_json\n    msg = self.recv(flags)\n  File "zmq/backend/cytho ::n/socket.pyx", line 791, in zmq.backend.cython.socket.Socket.recv\n  File :: "zmq/backend/cython/socket.pyx", line 827, in zmq.backend.cython.socket.Soc ::ket.recv\n  File "zmq/backend/cython/socket.pyx", line 186, in zmq.backen ::d.cython.socket._recv_copy\n  File "zmq/backend/cython/checkrc.pxd", line :: 13, in zmq.backend.cython.checkrc._check_rc\nKeyboardInterrupt\n'
 
 
 #%%
