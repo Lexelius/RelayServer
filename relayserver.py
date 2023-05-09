@@ -15,7 +15,7 @@ import subprocess
 import sys
 import os
 from ptypy import utils as u
-
+import inspect
 
 class RelayServer(object):
 
@@ -33,6 +33,7 @@ class RelayServer(object):
         #                                    stderr=subprocess.STDOUT)
 
         # Initialize parameters
+        self.RS_path = os.path.dirname(os.path.abspath(inspect.stack()[0][1]))
         self.running = True
         self.latest_pos_index_received = -1
         self.latest_det_index_received = -1  # Counting every received image, assumes they come in the correct order and that no images are lost
@@ -53,6 +54,7 @@ class RelayServer(object):
         self.center = None
         self.newcenter = None
         self.sendimg = []
+        print(self.__dict__)
 
     def connect(self, detector_address, motors_address, relay_address, simulate):
         """
@@ -81,12 +83,11 @@ class RelayServer(object):
         self.relay_socket.bind(relay_address)
 
         # Start simulating an ongoing experiment
-        RS_path = os.path.dirname(f'{os.path.abspath(__file__)}')
         if simulate:
-                self.runpub = subprocess.Popen([sys.executable, RS_path + '/Simulators/Motor_streamer.py'],
+                self.runpub = subprocess.Popen([sys.executable, self.RS_path + '/Simulators/Motor_streamer.py'],
                                           stdout=subprocess.PIPE,
                                           stderr=subprocess.STDOUT)
-                self.runpush = subprocess.Popen([sys.executable, RS_path + '/Simulators/Detector_streamer.py'],
+                self.runpush = subprocess.Popen([sys.executable, self.RS_path + '/Simulators/Detector_streamer.py'],
                                            stdout=subprocess.PIPE,
                                            stderr=subprocess.STDOUT)
 
@@ -199,7 +200,7 @@ class RelayServer(object):
                         # Get the correct indices corresponding to the requested frame_nr
                         sendmsg = [self.all_msg.pop(key) for key in self.frame_nr]
                         #!###sendimg = np.array([self.crop(self.all_img.get(key)) for key in self.frame_nr]) #!# CHANGE get TO POP!
-                        sendimg = np.array([self.all_img.get(key) for key in self.frame_nr])  # !# CHANGE get TO POP!
+                        sendimg = np.array([self.all_img.get(key) for key in self.frame_nr])  # !# CHANGE get TO POP! BUT ADD DEBUG/TEST OPTION WHICH DOES USE GET!!
                         if self.do_crop:
                             sendimg, self.newcenter, self.padmask = self.crop(sendimg)
                             if self.load_replies == 0:
@@ -373,9 +374,7 @@ class RelayServer(object):
     #         return diff
 
 
-
-
-if __name__ == "__main__":
+def launch():
     # info about which hosts and ports to use are in gitlab>streaming-receiver>detector-config.json
     known_sources = {'Simulator': {'det_adr': 'tcp://0.0.0.0:56789', 'pos_adr': 'tcp://127.0.0.1:5556'},
                    #'NanoMAX_eiger1M': {'det_adr': 'tcp://b-daq-node-2:20007', 'pos_adr': 'tcp://172.16.125.30:5556'},
@@ -393,4 +392,8 @@ if __name__ == "__main__":
 
     #pubout = RS.runpub.communicate()[0].decode().split('\n')
     #pushout = RS.runpush.communicate()[0].decode().split('\n')
+    return RS
+
+if __name__ == "__main__":
+    known_sources, src, relay_adr, RS = launch()
 
