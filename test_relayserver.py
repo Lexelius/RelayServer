@@ -1,18 +1,375 @@
 """
-Run with prints to stdout:
-py.test -v --capture=tee-sys /home/reblex/RelayServer/test_RelayServer.py
+Run a specific test with prints to stdout:
+py.test -v --capture=tee-sys /home/reblex/RelayServer/test_relayserver.py::test_run_recon
 """
-from relayserver import RelayServer
+import os
+try:
+    from . import relayserver
+    from .relayserver import RelayServer
+except:
+    ### DEBUG: only used in the development stage in order to run things in ipython
+    from relayserver import RelayServer
+    import relayserver
 import numpy as np
 import pytest
 import sys
-import os
 import subprocess
 import time
+import threading
+from threading import Thread
+from threading import local
+import contextlib
+import io
+from io import StringIO
+"""
+Ideas for tests to implement:
+* Check that correct decompression is used, i.e. that it includes/excludes the first 12 bytes.
+* Check that RS receives messages from both Motor_streamer and Detector_streamer in simulation mode.
+* Check that rebinning is done as expected.
+* When running together with ptypy, check that: 
+    * RS receives a 'preprocess' request.
+    * RS receives a 'check_energy' request.
+    * all sockets are closed after ptypy knows the scan has ended.
+    
++ Implement something like 'if ptypy is installed then also do the full reconstruction tests.'
 
+"""
 print('Starting tests')
 
+class ThreadWithReturnValue(Thread):
+    """
+    Copied from https://stackoverflow.com/questions/6893968/how-to-get-the-return-value-from-a-thread
+    """
+    def __init__(self, group=None, target=None, name=None,
+                 args=(), kwargs={}, Verbose=None):
+        Thread.__init__(self, group, target, name, args, kwargs)
+        self._return = None
 
+    def run(self):
+        if self._target is not None:
+            self._return = self._target(*self._args,
+                                        **self._kwargs)
+
+    def join(self, *args):
+        Thread.join(self, *args)
+        return self._return
+
+
+def modify_code(function, add_code, index=None):
+    """
+
+    Parameters
+    ----------
+    function
+    add_code  : type {str}
+    index  :  line number where 'add_code' should be inserted.
+                Default: -2, if last line of function includes 'return', -1 otherwise.
+
+    Returns
+    -------
+    new_func  :  A string of 'function'-s source code with 'add_code' inserted at the
+                end of the function, that can the executed using exec(new_func).
+
+    """
+    import inspect
+    # func_str = inspect.getsource(function)
+    # func_name = function.__name__ + '()' ## slower alternative: func_name = func_str.split(":\n")[0].removeprefix("def ")
+    # new_func = func_str
+
+    func_strings = inspect.getsourcelines(function)[0]
+    func_name = function.__name__ + '()' ## slower alternative: func_name = func_strings[0].split(":\n")[0].removeprefix("def ")
+    if index is None:
+        if 'return' in func_strings[-1]:
+            index = -2
+        else:
+            index = -1
+
+    if not add_code.endswith('\n'):
+        add_code += '\n'
+
+    if func_strings[index].startswith('    '):
+        nr_ws = func_strings[index].count('    ')
+        if not add_code.startswith(func_strings[index].count('    ')*'    '):
+            print("\nNOTE: The added code has a different indentation level than where it's inserted!\n")
+
+    func_strings.insert(index, str(add_code))
+    new_func = ''
+    new_func = new_func.join(func_strings)
+    new_func += func_name
+
+    return new_func
+
+
+### @pytest.fixture(params=[[None, 1],
+###                         [10, 1]], scope='session'
+###                 )
+def reconstruct():###request):
+    import sys
+    import time
+    import socket
+    import ptypy
+    from ptypy.core import Ptycho
+    from ptypy import utils as u
+    from mpi4py import MPI
+
+    if float(ptypy.version[:3]) >= float('0.5'):
+        ptypy.load_ptyscan_module("livescan")
+
+    ### frames_per_iter, numiter = request.param
+    scannr = 0
+    defocus_um = 600
+
+    # General parameters
+    p = u.Param()
+    p.verbose_level = 'interactive'
+    p.run = 'scan%d' % scannr
+
+    p.io = u.Param()
+    p.io.interaction = u.Param()
+    p.io.interaction.active = False
+    # p.io.interaction.server = u.Param()
+    # IPaddr = socket.gethostbyname(socket.gethostname())
+    # p.io.interaction.server.address = f'tcp://{IPaddr}'
+    # p.io.interaction.server.port = 5560
+    # p.io.interaction.client = u.Param()
+    # p.io.interaction.client.address = f'tcp://{IPaddr}'
+    # p.io.interaction.client.port = 5560
+    p.io.autosave = u.Param()
+    p.io.autosave.active = False
+    p.io.autoplot = u.Param()
+    p.io.autoplot.active = False
+
+    # Scan parameters
+    p.scans = u.Param()
+    p.scans.scan00 = u.Param()
+    p.scans.scan00.name = 'BlockFull'
+    p.scans.scan00.data = u.Param()
+    p.scans.scan00.data.name = 'LiveScan'
+    p.scans.scan00.data.detector = 'eiger'
+    p.scans.scan00.data.xMotor = 'sx'
+    p.scans.scan00.data.yMotor = 'sy'
+    p.scans.scan00.data.relay_host = 'tcp://127.0.0.1'
+    p.scans.scan00.data.relay_port = 45678
+    p.scans.scan00.data.shape = (256, 256)
+    p.scans.scan00.data.crop_at_RS = (256, 256)
+    p.scans.scan00.data.rebin = None
+    p.scans.scan00.data.rebin_at_RS = 4
+    p.scans.scan00.data.center = None
+    p.scans.scan00.data.auto_center = None
+    p.scans.scan00.data.xMotorFlipped = False
+    p.scans.scan00.data.yMotorFlipped = False
+    p.scans.scan00.data.orientation = None
+    p.scans.scan00.data.distance = 3.512
+    p.scans.scan00.data.psize = 75e-6
+    p.scans.scan00.data.min_frames = 1
+    p.scans.scan00.data.block_wait_count = 1
+    p.scans.scan00.data.start_frame = 1
+    p.scans.scan00.data.frames_per_iter = 10###frames_per_iter #10#None
+    p.scans.scan00.data.load_parallel = 'all'
+
+    # Scan parameters: illumination
+    p.scans.scan00.illumination = u.Param()
+    p.scans.scan00.illumination.model = None
+    p.scans.scan00.illumination.aperture = u.Param()
+    p.scans.scan00.illumination.aperture.form = 'rect'
+    p.scans.scan00.illumination.aperture.size = 100e-9
+    p.scans.scan00.illumination.propagation = u.Param()
+    p.scans.scan00.illumination.propagation.parallel = -1. * defocus_um * 1e-6
+    p.scans.scan00.illumination.diversity = u.Param()
+    p.scans.scan00.illumination.diversity.noise = (.5, 1.0)
+    p.scans.scan00.illumination.diversity.power = .1
+
+    # Engine
+    p.engines = u.Param()
+    p.engines.engine00 = u.Param()
+    p.engines.engine00.name = 'DM'
+    p.engines.engine00.numiter = 1 ### numiter#1
+    p.engines.engine00.numiter_contiguous = 1
+    p.engines.engine00.probe_support = 10
+
+    p.frames_per_block = 1
+
+    P = Ptycho(p, level=5)
+    return p, P
+
+#%%
+
+def run_recon():
+    #thread_rec = ThreadWithReturnValue(target=execfile, args=(("/home/reblex/Documents/Scripts/Reconstruct_livescan_siemens_KB.py"),))
+
+    # sys.stdout = open(os.devnull, 'w')
+    # thread_rs = ThreadWithReturnValue(target=execfile, args=("/home/reblex/RelayServer/relayserver.py",))
+    # sys.stdout = sys.__stdout__
+    # thread_rs.start()
+
+    # with contextlib.redirect_stdout(StringIO()):#(os.devnull):
+    #     thread_rs = ThreadWithReturnValue(target=execfile, args=(("/home/reblex/RelayServer/relayserver.py"),))
+    #     thread_rs.start()
+
+    stdout = StringIO()
+    ###sys.stdout = stdout  # suppresses output
+
+    ###thread_rs = ThreadWithReturnValue(target=exec, args=(open("/home/reblex/RelayServer/relayserver.py").read(), RelayServer.__annotations__))
+    ###thread_rec = ThreadWithReturnValue(target=exec, args=(open("/home/reblex/Documents/Scripts/Reconstruct_livescan_siemens_KB.py").read(),))
+    thread_rec = ThreadWithReturnValue(target=reconstruct)
+    thread_rs = ThreadWithReturnValue(target=relayserver.launch)
+    # thread_rs = ThreadWithReturnValue(target=execfile, args=("/home/reblex/RelayServer/relayserver.py",))
+    # thread_rec = ThreadWithReturnValue(target=execfile, args=(("/home/reblex/Documents/Scripts/Reconstruct_livescan_siemens_KB.py"),))
+    thread_rec.start()
+    thread_rs.start()
+    #
+    # sys.stdout = sys.__stdout__
+    #
+    # output = stdout.getvalue()
+    return thread_rs, thread_rec, stdout
+
+# sys.stdout = open(os.devnull, 'w')
+# thread_rs = ThreadWithReturnValue(target=execfile, args=("/home/reblex/RelayServer/relayserver.py",))
+# sys.stdout = sys.__stdout__
+# thread_rs.start()
+
+def test_run_recon():
+    thread_rs, thread_rec, stdout = run_recon()
+    ###sys.stdout = sys.__stdout__  # stops suppressing output
+    print(f'\n\nis_alive(thread_rs, thread_rec): {thread_rs.is_alive()}, {thread_rec.is_alive()}\n')
+    #time.sleep(3)
+    thread_rec.is_alive()
+    thread_rs.is_alive()
+    recout = thread_rec.join(1)
+    rsout = thread_rs.join(1)
+    thread_rec._tstate_lock.release()
+    #thread_rs._tstate_lock.release()
+    #output = stdout.getvalue()
+    return thread_rs, thread_rec, stdout
+
+def test_run_recon2():
+    thread_rec = ThreadWithReturnValue(target=reconstruct)
+    thread_rs = ThreadWithReturnValue(target=relayserver.launch)
+    stdout = StringIO()
+    sys.stdout = stdout  # suppresses output
+    thread_rec.start()
+    thread_rs.daemon = True
+    thread_rs.start()
+    while thread_rec.is_alive():
+        time.sleep(1)
+    sys.stdout = sys.__stdout__  # stops suppressing output
+    print(f'\n\nis_alive(thread_rs, thread_rec): {thread_rs.is_alive()}, {thread_rec.is_alive()}\n')
+    recout = thread_rec.join(1)
+    rsout = thread_rs.join(1)
+    if thread_rec._tstate_lock is not None:
+        thread_rec._tstate_lock.release()
+        print('Releasing thread_rec._tstate_lock')
+    if thread_rs._tstate_lock is not None:
+        thread_rs._tstate_lock.release()
+        print('Releasing thread_rs._tstate_lock')
+    output = stdout.getvalue()
+    return thread_rs, thread_rec, recout, rsout, stdout, output
+#thread_rs, thread_rec, recout, rsout, stdout, output = test_run_recon2()
+
+###########################################################################
+#%%
+# @pytest.fixture(scope='session')
+# def run_recon2():
+#     thread_rec = ThreadWithReturnValue(target=reconstruct)
+#     thread_rs = ThreadWithReturnValue(target=relayserver.launch)
+#     stdout = StringIO()
+#     sys.stdout = stdout  # suppresses output
+#     thread_rec.start()
+#     thread_rs.daemon = True
+#     thread_rs.start()
+#     while thread_rec.is_alive():
+#         time.sleep(1)
+#     sys.stdout = sys.__stdout__  # stops suppressing output
+#     print(f'\n\nis_alive(thread_rs, thread_rec): {thread_rs.is_alive()}, {thread_rec.is_alive()}\n')
+#     recout = thread_rec.join(1)
+#     rsout = thread_rs.join(1)
+#     if thread_rec._tstate_lock is not None:
+#         thread_rec._tstate_lock.release()
+#         print('Releasing thread_rec._tstate_lock')
+#     if thread_rs._tstate_lock is not None:
+#         thread_rs._tstate_lock.release()
+#         print('Releasing thread_rs._tstate_lock')
+#     output = stdout.getvalue()
+#     return thread_rs, thread_rec, recout, rsout, stdout, output
+loc = threading.local()
+rs = []
+@pytest.fixture(scope='session')
+def run_recon2():### reconstruct):
+    thread_rec = ThreadWithReturnValue(target=reconstruct)
+    # thread_rs = ThreadWithReturnValue(target=relayserver.launch)
+    import inspect
+    #loc = threading.local()
+    #rs = []
+    func_strings = inspect.getsourcelines(relayserver.launch)[0]
+    func_strings.append("launch()")
+    new_func = ''.join(func_strings)
+    new_func = new_func.replace("RS", "loc.RS")
+    new_func = ''.join([new_func[:new_func.find("\n", new_func.find("RelayServer()"))], "\n    rs.append(loc.RS)", new_func[new_func.find("\n", new_func.find("RelayServer()")):]])
+    thread_rs = threading.Thread(target=exec, args=(new_func, globals()))
+    stdout = StringIO()
+    sys.stdout = stdout  # suppresses output
+    thread_rec.start()
+    thread_rs.start()
+    while thread_rec.is_alive():
+        time.sleep(1)
+    sys.stdout = sys.__stdout__  # stops suppressing output
+    print(f'\n\nis_alive(thread_rs, thread_rec): {thread_rs.is_alive()}, {thread_rec.is_alive()}\n')
+    recout = thread_rec.join(1)
+    rsout = thread_rs.join(1)
+    ##thread_rs.join(1)
+    if thread_rec._tstate_lock is not None:
+        thread_rec._tstate_lock.release()
+        print('Releasing thread_rec._tstate_lock')
+    if thread_rs._tstate_lock is not None:
+        thread_rs._tstate_lock.release()
+        print('Releasing thread_rs._tstate_lock')
+    print('\n'+''.center(80, ':'))
+    print('loc = ', loc.__dict__)
+    print(rs[0])
+    print(''.center(80, ':'))
+    output = stdout.getvalue()
+    return thread_rs, thread_rec, recout, rsout, stdout, output
+
+def test_run_recon2_1(run_recon2):
+    """
+    Make sure that that RelayServer terminated properly
+    WORKS!!
+    """
+    thread_rs, thread_rec, recout, rsout, stdout, output = run_recon2
+    if len(rs) <= 0:
+        pytest.fail("No parameters saved from RS.")
+    print('relay_socket.closed :  ', rs[0].relay_socket.closed)
+    if not rs[0].relay_socket.closed:
+        rs[0].relay_socket.close()
+        pytest.fail("relay_socket not closed.")
+
+# @pytest.mark.skipif(depends=["test_run_recon2_1"])
+# @pytest.mark.depends(on=['test_run_recon2_1'], scope='session')
+@pytest.mark.dependency(depends=['test_run_recon2_1'], scope='module')
+def test_run_recon2_2(run_recon2):
+    """
+    Make sure that diffraction patterns used in the reconstruction
+    are the same as the ones sent from the RelayServer.
+    """
+    thread_rs, thread_rec, recout, rsout, stdout, output = run_recon2
+    for chunk in zip(range(len(rs[0].sendimg)), recout[1].diff.S.keys()):
+        assert (rs[0].sendimg[chunk[0]][0] == recout[1].diff.S[chunk[1]].data).all()
+
+# @pytest.mark.skipif(depends=["test_run_recon2_1"])# fails even if test_run_recon2_1 succeeds
+# @pytest.mark.depends(on=['test_run_recon2_1'], scope='session')
+#@pytest.mark.dependency(depends=['test_run_recon2_1'], scope='module')
+
+#@pytest.mark.skip(reason="no way of currently testing this")
+def test_run_recon2_3(run_recon2):
+    """
+    ...
+    """
+    thread_rs, thread_rec, recout, rsout, stdout, output = run_recon2
+    if rsout is None:
+        pytest.fail("Expected fail..")
+    assert rsout.sendimg[0][0].shape == recout[1].diff.S['S0000'].data.shape
+
+#%%
 @pytest.mark.parametrize("diff, get_weights", [
         (np.ones((10, 7, 5)) * np.arange(1, 36).reshape((7, 5)), False)
         ])
@@ -73,6 +430,7 @@ def test_crop2(RS_diff_opts, get_weights):
 
 
 # %%
+
 def test_recon():
     print('\n------------------ test_recon() ------------------')
     recon = subprocess.Popen([sys.executable, '/home/reblex/Documents/Scripts/Reconstruct_livescan_siemens_KB.py'],
@@ -105,7 +463,7 @@ def test_RS():
         then if recon has exited but not RS.run then fail the test!
     """
     print('\n------------------ test_RS() ------------------')
-    recon = subprocess.Popen([sys.executable, '/home/reblex/Documents/Scripts/Reconstruct_livescan_siemens_KB.py' > '/home/reblex/Desktop/temp.txt'],
+    recon = subprocess.Popen([sys.executable, '/home/reblex/Documents/Scripts/Reconstruct_livescan_siemens_KB.py'],
                              stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT)
     print(f'Started reconstruction in subprocess at {time.strftime("%H:%M:%S", time.localtime())}')
@@ -126,28 +484,29 @@ def test_RS():
                              stderr=subprocess.STDOUT)
     print(f'Started RelayServer in subprocess at {time.strftime("%H:%M:%S", time.localtime())}')
 
-    retpoll = None
+    recpoll = None
     rspoll = None
     t0 = time.time()
-    while retpoll is None and time.time() - t0 < 30:
+    while recpoll is None and time.time() - t0 < 10:
         time.sleep(2)
-        retpoll = recon.poll()
+        recpoll = recon.poll()
         rspoll = RSrun.poll()
-        print(f'{(time.time() - t0):.04}:  recon.poll = {retpoll}, RSrun.poll = {rspoll}')
+        print(f'{(time.time() - t0):.04}:  recon.poll = {recpoll}, RSrun.poll = {rspoll}')
 
     # recon.wait(20)
     # print(recon.communicate()[0].decode().split('\n'))
     # print(RSrun.communicate()[0].decode().split('\n'))
     #
     #
-    # assert recon.returncode == 0
-    # if recon.returncode == 0:
-    #     assert RSrun.returncode == 0
+    assert recon.returncode == 0
+    if recon.returncode == 0:
+        assert RSrun.returncode == 0
     # # if 'End of scan reached' in recon.communicate()[0].decode().split('\n'):
     # #     assert RS.relay_socket.closed
     return recon, RSrun
 
 
-recproc, rsproc = test_RS()
+#recproc, rsproc = test_RS()
 
 # %%
+
