@@ -194,103 +194,6 @@ def reconstruct():###request):
 
 #%%
 
-def run_recon():
-    #thread_rec = ThreadWithReturnValue(target=execfile, args=(("/home/reblex/Documents/Scripts/Reconstruct_livescan_siemens_KB.py"),))
-
-    # sys.stdout = open(os.devnull, 'w')
-    # thread_rs = ThreadWithReturnValue(target=execfile, args=("/home/reblex/RelayServer/relayserver.py",))
-    # sys.stdout = sys.__stdout__
-    # thread_rs.start()
-
-    # with contextlib.redirect_stdout(StringIO()):#(os.devnull):
-    #     thread_rs = ThreadWithReturnValue(target=execfile, args=(("/home/reblex/RelayServer/relayserver.py"),))
-    #     thread_rs.start()
-
-    stdout = StringIO()
-    ###sys.stdout = stdout  # suppresses output
-
-    ###thread_rs = ThreadWithReturnValue(target=exec, args=(open("/home/reblex/RelayServer/relayserver.py").read(), RelayServer.__annotations__))
-    ###thread_rec = ThreadWithReturnValue(target=exec, args=(open("/home/reblex/Documents/Scripts/Reconstruct_livescan_siemens_KB.py").read(),))
-    thread_rec = ThreadWithReturnValue(target=reconstruct)
-    thread_rs = ThreadWithReturnValue(target=relayserver.launch)
-    # thread_rs = ThreadWithReturnValue(target=execfile, args=("/home/reblex/RelayServer/relayserver.py",))
-    # thread_rec = ThreadWithReturnValue(target=execfile, args=(("/home/reblex/Documents/Scripts/Reconstruct_livescan_siemens_KB.py"),))
-    thread_rec.start()
-    thread_rs.start()
-    #
-    # sys.stdout = sys.__stdout__
-    #
-    # output = stdout.getvalue()
-    return thread_rs, thread_rec, stdout
-
-# sys.stdout = open(os.devnull, 'w')
-# thread_rs = ThreadWithReturnValue(target=execfile, args=("/home/reblex/RelayServer/relayserver.py",))
-# sys.stdout = sys.__stdout__
-# thread_rs.start()
-
-def test_run_recon():
-    thread_rs, thread_rec, stdout = run_recon()
-    ###sys.stdout = sys.__stdout__  # stops suppressing output
-    print(f'\n\nis_alive(thread_rs, thread_rec): {thread_rs.is_alive()}, {thread_rec.is_alive()}\n')
-    #time.sleep(3)
-    thread_rec.is_alive()
-    thread_rs.is_alive()
-    recout = thread_rec.join(1)
-    rsout = thread_rs.join(1)
-    thread_rec._tstate_lock.release()
-    #thread_rs._tstate_lock.release()
-    #output = stdout.getvalue()
-    return thread_rs, thread_rec, stdout
-
-def test_run_recon2():
-    thread_rec = ThreadWithReturnValue(target=reconstruct)
-    thread_rs = ThreadWithReturnValue(target=relayserver.launch)
-    stdout = StringIO()
-    sys.stdout = stdout  # suppresses output
-    thread_rec.start()
-    thread_rs.daemon = True
-    thread_rs.start()
-    while thread_rec.is_alive():
-        time.sleep(1)
-    sys.stdout = sys.__stdout__  # stops suppressing output
-    print(f'\n\nis_alive(thread_rs, thread_rec): {thread_rs.is_alive()}, {thread_rec.is_alive()}\n')
-    recout = thread_rec.join(1)
-    rsout = thread_rs.join(1)
-    if thread_rec._tstate_lock is not None:
-        thread_rec._tstate_lock.release()
-        print('Releasing thread_rec._tstate_lock')
-    if thread_rs._tstate_lock is not None:
-        thread_rs._tstate_lock.release()
-        print('Releasing thread_rs._tstate_lock')
-    output = stdout.getvalue()
-    return thread_rs, thread_rec, recout, rsout, stdout, output
-#thread_rs, thread_rec, recout, rsout, stdout, output = test_run_recon2()
-
-###########################################################################
-#%%
-# @pytest.fixture(scope='session')
-# def run_recon2():
-#     thread_rec = ThreadWithReturnValue(target=reconstruct)
-#     thread_rs = ThreadWithReturnValue(target=relayserver.launch)
-#     stdout = StringIO()
-#     sys.stdout = stdout  # suppresses output
-#     thread_rec.start()
-#     thread_rs.daemon = True
-#     thread_rs.start()
-#     while thread_rec.is_alive():
-#         time.sleep(1)
-#     sys.stdout = sys.__stdout__  # stops suppressing output
-#     print(f'\n\nis_alive(thread_rs, thread_rec): {thread_rs.is_alive()}, {thread_rec.is_alive()}\n')
-#     recout = thread_rec.join(1)
-#     rsout = thread_rs.join(1)
-#     if thread_rec._tstate_lock is not None:
-#         thread_rec._tstate_lock.release()
-#         print('Releasing thread_rec._tstate_lock')
-#     if thread_rs._tstate_lock is not None:
-#         thread_rs._tstate_lock.release()
-#         print('Releasing thread_rs._tstate_lock')
-#     output = stdout.getvalue()
-#     return thread_rs, thread_rec, recout, rsout, stdout, output
 loc = threading.local()
 rs = []
 @pytest.fixture(scope='session')
@@ -330,6 +233,7 @@ def run_recon2():### reconstruct):
     output = stdout.getvalue()
     return thread_rs, thread_rec, recout, rsout, stdout, output
 
+
 def test_run_recon2_1(run_recon2):
     """
     Make sure that that RelayServer terminated properly
@@ -343,9 +247,7 @@ def test_run_recon2_1(run_recon2):
         rs[0].relay_socket.close()
         pytest.fail("relay_socket not closed.")
 
-# @pytest.mark.skipif(depends=["test_run_recon2_1"])
-# @pytest.mark.depends(on=['test_run_recon2_1'], scope='session')
-@pytest.mark.dependency(depends=['test_run_recon2_1'], scope='module')
+
 def test_run_recon2_2(run_recon2):
     """
     Make sure that diffraction patterns used in the reconstruction
@@ -355,11 +257,7 @@ def test_run_recon2_2(run_recon2):
     for chunk in zip(range(len(rs[0].sendimg)), recout[1].diff.S.keys()):
         assert (rs[0].sendimg[chunk[0]][0] == recout[1].diff.S[chunk[1]].data).all()
 
-# @pytest.mark.skipif(depends=["test_run_recon2_1"])# fails even if test_run_recon2_1 succeeds
-# @pytest.mark.depends(on=['test_run_recon2_1'], scope='session')
-#@pytest.mark.dependency(depends=['test_run_recon2_1'], scope='module')
 
-#@pytest.mark.skip(reason="no way of currently testing this")
 def test_run_recon2_3(run_recon2):
     """
     ...
