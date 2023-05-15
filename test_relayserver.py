@@ -264,66 +264,6 @@ def test_run_recon3_1(run_recon3):
 
 #%%
 
-# loc = threading.local()
-# rs = []
-# #@pytest.mark.parametrize("frames_per_iter", [(10, None)])
-# @pytest.fixture(params=[[(10)]], scope='session')  # function, class, module, package or session
-# def run_recon2(request):### reconstruct):
-#     print('Starting run_recon2'.center(80, '/'))
-#     frames_per_iter = request.param
-#     thread_rec = ThreadWithReturnValue(target=reconstruct, args=frames_per_iter)
-#     # thread_rs = ThreadWithReturnValue(target=relayserver.launch)
-#     #loc = threading.local()
-#     #rs = []
-#     func_strings = inspect.getsourcelines(relayserver.launch)[0]
-#     func_strings.append("launch()")
-#     new_func = ''.join(func_strings)
-#     new_func = new_func.replace("RS", "loc.RS")
-#     new_func = ''.join([new_func[:new_func.find("\n", new_func.find("RelayServer()"))], "\n    rs.append(loc.RS)", new_func[new_func.find("\n", new_func.find("RelayServer()")):]])
-#     thread_rs = threading.Thread(target=exec, args=(new_func, globals()))
-#     stdout = StringIO()
-#     sys.stdout = stdout  # suppresses output, stopped working for some reason..
-#     thread_rec.start()
-#     thread_rs.start()
-#     while thread_rec.is_alive():
-#         time.sleep(1)
-#     sys.stdout = sys.__stdout__  # stops suppressing output
-#     print(f'\n\nis_alive(thread_rs, thread_rec): {thread_rs.is_alive()}, {thread_rec.is_alive()}\n')
-#     recout = thread_rec.join(1)
-#     thread_rs.join(1)
-#     if thread_rec._tstate_lock is not None:
-#         thread_rec._tstate_lock.release()
-#         print('Releasing thread_rec._tstate_lock')
-#     if thread_rs._tstate_lock is not None:
-#         thread_rs._tstate_lock.release()
-#         print('Releasing thread_rs._tstate_lock')
-#     print('\n'+''.center(80, ':'))
-#     print('loc = ', loc.__dict__)
-#     print(rs[0])
-#     print(''.center(80, ':'))
-#     output = stdout.getvalue()
-#     print('Ending run_recon2'.center(80, '/'))
-#     return thread_rs, thread_rec, recout, stdout, output
-#
-#
-# def test_run_recon2_1(run_recon2):
-#     """
-#     Make sure that that RelayServer terminated properly
-#     WORKS!!
-#     """
-#     print('Starting test_run_recon2_1'.center(80, '\\'))
-#     thread_rs, thread_rec, recout, stdout, output = run_recon2
-#     if len(rs) <= 0:
-#         pytest.fail("No parameters saved from RS.")
-#     print('relay_socket.closed :  ', rs[0].relay_socket.closed)
-#     if not rs[0].relay_socket.closed:
-#         rs[0].stop_outstream()
-#         rs[0].relay_socket.context.destroy()
-#         print('relay_socket.closed 2:  ', rs[0].relay_socket.closed)
-#         pytest.fail("relay_socket not closed.")
-#     print('Ending run_recon2'.center(80, '\\'))
-
-
 def test_run_recon3_2(run_recon3):
     """
     Makes sure that diffraction patterns used in the reconstruction
