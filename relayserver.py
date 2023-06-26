@@ -34,7 +34,7 @@ class RelayServer(object):
 
         # Initialize parameters
         self.RS_path = os.path.dirname(os.path.abspath(inspect.stack()[0][1]))
-        self.running = True
+        self.running = None
         self.latest_pos_index_received = -1
         self.latest_det_index_received = -1  # Counting every received image, assumes they come in the correct order and that no images are lost
         self.end_of_scan = False
@@ -98,6 +98,7 @@ class RelayServer(object):
         # ToDO: Add some assertion/check that sockets have been connected before continuing from here.
         i = -1
         j = -1
+        self.running = True
         while self.running:
             try:
                 #!#try:
@@ -226,11 +227,12 @@ class RelayServer(object):
                         self.relay_socket.send(compress_lz4(sendimg), copy=True)
                         self.load_replies += 1
                     elif request[0] == 'stop':
+                        ##ToDo change this method so it closes the socket if RS has sent everything instead of waiting for a request from the LS side!
                         self.relay_socket.send_json(['closing connection to relay_socket'])
                         self.stop_outstream()
 
 
-                if self.end_of_scan and self.end_of_det_stream:
+                if self.end_of_scan and self.end_of_det_stream:  # and not (self.det_socket.closed and self.pos_socket.closed):
                     self.stop()
 
             # To make sure sockets gets closed
@@ -252,7 +254,7 @@ class RelayServer(object):
         self.pos_socket.close()
 
     def stop_outstream(self):
-        print(f'Closing the relay_socket at {time.strftime("%H:%M:%S", time.localtime())}! {time.time()-self.t0} seconds')
+        print(f'Closing the relay_socket at {time.strftime("%H:%M:%S", time.localtime())}! {time.time()-self.t0:.04f} seconds')
         self.relay_socket.close()
         self.running = False
 
@@ -374,8 +376,9 @@ class RelayServer(object):
     #         return diff
 
 
-def launch():
+def launch(RS):
     # info about which hosts and ports to use are in gitlab>streaming-receiver>detector-config.json
+    #     https://gitlab.maxiv.lu.se/scisw/detectors/streaming-receiver-cpp
     known_sources = {'Simulator': {'det_adr': 'tcp://0.0.0.0:56789', 'pos_adr': 'tcp://127.0.0.1:5556'},
                    #'NanoMAX_eiger1M': {'det_adr': 'tcp://b-daq-node-2:20007', 'pos_adr': 'tcp://172.16.125.30:5556'},
                    'NanoMAX_eiger1M': {'det_adr': 'tcp://p-daq-cn-2:20007', 'pos_adr': 'tcp://172.16.125.30:5556'},
@@ -386,7 +389,7 @@ def launch():
     relay_adr = 'tcp://127.0.0.1:45678'
 
     # RS = RelayServer(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True)
-    RS = RelayServer()
+    ## RS = RelayServer()
     RS.connect(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True)
     RS.run()
 
