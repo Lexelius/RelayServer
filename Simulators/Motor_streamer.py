@@ -31,11 +31,12 @@ scans = {0: {'scan_file': '/data/visitors/nanomax/20220196/2022040308/raw/mar29_
          2: {'scan_file': '/home/reblex/Documents/Data/SavedRelayMessages/20220824/raw/sample/scan_000029_eiger1m.hdf5', 'detector': 'eiger1m'},
          3: {'scan_file': '/home/reblex/Documents/Data/nanomax_siemens_KB/scan_000006_eiger.hdf5', 'detector': 'eiger'},
          4: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/scan_000038_eiger1m.hdf5', 'detector': 'eiger1m'},
-         5: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/scan_000040_eiger1m.hdf5', 'detector': 'eiger1m'}
+         5: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/scan_000040_eiger1m.hdf5', 'detector': 'eiger1m'},
+         6: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/sliced_scan_000040/scan_000040_eiger1m.hdf5', 'detector': 'eiger1m'}
          }
-sample = 5  ######## Pick your sample here!
+sample = 6  ######## Pick your sample here!
 scan_fname = scans[sample]['scan_file']
-path, scannr = re.findall(r'/.{0,}/|\d{6}', scan_fname)
+path, scannr = re.findall(r'/.{0,}/|\d{6}', scan_fname)  # ToDo: use os.path.split(scan_fname)
 h5_fname = path + scannr + '.h5'
 
 h5_data = io.h5read(h5_fname, 'entry')['entry']
@@ -74,9 +75,9 @@ def divide_msgs(dct, i):
 
 # Correcting the ['eiger']['frames'] outside divide_msgs to avoid unnecessary copy:
 msgs_prepped = copy.deepcopy(msgs)
-msgs_prepped[scans[sample]['detector']]['frames'] = {'type': 'Link',
-                                                     'filename': scan_fname,
-                                                     'path': 'entry/measurement/Eiger/data',
+msgs_prepped[scans[sample]['detector']]['frames'] = {'type':      'Link',
+                                                     'filename':  scan_fname,
+                                                     'path':      'entry/measurement/Eiger/data',
                                                      'universal': True}
 
 msgs_divided = list(map(lambda i: divide_msgs(copy.deepcopy(msgs_prepped), i), nr))
@@ -90,21 +91,21 @@ msgs_divided = list(map(lambda i: divide_msgs(copy.deepcopy(msgs_prepped), i), n
 initial_msg = {'scannr': scannr, 'status': 'started', 'path': path.rstrip('/'), 'snapshot': h5_data['snapshot'], 'description': h5_data['description']}
 last_msg = {'scannr': scannr, 'status': 'finished', 'path': path.rstrip('/'), 'snapshot': h5_data['snapshot'], 'description': h5_data['description']}
 
-time.sleep(1.3)  # naive wait for clients to arrive
+###time.sleep(1.3)  # naive wait for clients to arrive
 t1 = time.time()
 print(f'Prepping the contrast simulator took {t1 - t0:.04f} s.')
 print(f'Starting at time {time.strftime("%H:%M:%S", time.localtime())}')
 pos_socket.send_pyobj(initial_msg)
-time.sleep(0.2)
+###time.sleep(0.2)
 
 i = -1
 for i in range(nframes):
     pos_socket.send_pyobj(OrderedDict(msgs_divided[i]))
     print(f'Sent frame nr. {i} at time {time.strftime("%H:%M:%S", time.localtime())}')
-    time.sleep(0.2)
+###    time.sleep(0.2)
 
 pos_socket.send_pyobj(last_msg)
 print(f'Finished at time {time.strftime("%H:%M:%S", time.localtime())}')
 
-time.sleep(10)  # naive wait for tasks to drain
+###time.sleep(10)  # naive wait for tasks to drain
 pos_socket.close()
