@@ -213,47 +213,20 @@ def reconstruct(frames_per_iter):###request):
     return p, P
 
 #%%
-
+stdout = StringIO()
+sys.stdout = stdout  # suppresses output, stopped working for some reason..
 ##############################################################################
-# @pytest.fixture(params=[[(10)], [None]], scope='session')  # function, class, module, package or session
-# def run_recon3(request):### reconstruct):
-#     print('Starting run_recon2'.center(80, '/'))
-#     frames_per_iter = request.param
-#     rs = RelayServer()
-#     thread_rec = ThreadWithReturnValue(target=reconstruct, args=frames_per_iter)
-#     thread_rs = threading.Thread(target=relayserver.launch, args=(rs,))
-#     stdout = StringIO()
-#     sys.stdout = stdout  # suppresses output, stopped working for some reason..
-#     thread_rec.start()
-#     thread_rs.start()
-#     while thread_rec.is_alive():
-#         time.sleep(1)
-#     # sys.stdout = sys.__stdout__  # stops suppressing output
-#     print(f'\n\nis_alive(thread_rs, thread_rec): {thread_rs.is_alive()}, {thread_rec.is_alive()}\n')
-#     recout = thread_rec.join(1)
-#     thread_rs.join(1)
-#     if thread_rec._tstate_lock is not None:
-#         thread_rec._tstate_lock.release()
-#         print('Releasing thread_rec._tstate_lock')
-#     if thread_rs._tstate_lock is not None:
-#         thread_rs._tstate_lock.release()
-#         print('Releasing thread_rs._tstate_lock')
-#     output = stdout.getvalue()
-#     print('Ending run_recon2'.center(80, '/'))
-#     return thread_rs, thread_rec, recout, stdout, output, rs
-
-
 @pytest.fixture(params=[[(10)], [None]], scope='session')  # function, class, module, package or session
 def run_recon3(request):### reconstruct):
     print('Starting run_recon2'.center(80, '/'))
     frames_per_iter = request.param
     rs = RelayServer()
+    thread_rec = ThreadWithReturnValue(target=reconstruct, args=frames_per_iter)
+    thread_rs = threading.Thread(target=relayserver.launch, args=(rs,))
     stdout = StringIO()
-    with contextlib.redirect_stdout(os.devnull):
-        thread_rec = ThreadWithReturnValue(target=reconstruct, args=frames_per_iter)
-        thread_rs = threading.Thread(target=relayserver.launch, args=(rs,))
-        thread_rec.start()
-        thread_rs.start()
+    sys.stdout = stdout  # suppresses output, stopped working for some reason..
+    thread_rec.start()
+    thread_rs.start()
     while thread_rec.is_alive():
         time.sleep(1)
     # sys.stdout = sys.__stdout__  # stops suppressing output
@@ -270,10 +243,10 @@ def run_recon3(request):### reconstruct):
     print('Ending run_recon2'.center(80, '/'))
     return thread_rs, thread_rec, recout, stdout, output, rs
 
+
 def test_run_recon3_1(run_recon3):
     """
-    Make sure that that RelayServer terminated properly
-    WORKS!!
+    Makes sure that that RelayServer terminated properly.
     """
     print('Starting test_run_recon2_1'.center(80, '\\'))
     thread_rs, thread_rec, recout, stdout, output, rs = run_recon3
