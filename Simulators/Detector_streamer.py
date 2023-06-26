@@ -16,9 +16,10 @@ scans = {0: {'scan_file': '/data/visitors/nanomax/20220196/2022040308/raw/mar29_
          2: {'scan_file': '/home/reblex/Documents/Data/SavedRelayMessages/20220824/raw/sample/scan_000029_eiger1m.hdf5', 'detector': 'eiger1m'},
          3: {'scan_file': '/home/reblex/Documents/Data/nanomax_siemens_KB/scan_000006_eiger.hdf5', 'detector': 'eiger'},
          4: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/scan_000038_eiger1m.hdf5', 'detector': 'eiger1m'},
-         5: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/scan_000040_eiger1m.hdf5', 'detector': 'eiger1m'}
+         5: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/scan_000040_eiger1m.hdf5', 'detector': 'eiger1m'},
+         6: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/sliced_scan_000040/scan_000040_eiger1m.hdf5', 'detector': 'eiger1m'}
          }
-sample = 5  ######## Pick your sample here!
+sample = 6  ######## Pick your sample here! 0:27fr, 1:1000fr, 2:16fr, 3:100fr, 4:55fr, 5:55fr, 6:15fr
 scan_fname = scans[sample]['scan_file']
 path, scannr = re.findall(r'/.{0,}/|\d{6}', scan_fname)
 data = io.h5read(scan_fname, 'entry')['entry']['measurement']['Eiger']['data']
@@ -51,7 +52,7 @@ except zmq.error.ZMQError as e:
 ######## If you're sure port is available you'd simply use:
 ####det_socket.bind('tcp://0.0.0.0:56789') ## 'tcp://b-daq-node-2:20001'
 
-time.sleep(2)  # naive wait for clients to arrive
+###time.sleep(2)  # naive wait for clients to arrive
 
 i = -1
 k = 438  ## sort of random nr, depends on how many runs have been made previously.
@@ -60,7 +61,7 @@ t1 = time.time()
 print(f'Prepping the eiger simulator took {t1 - t0:.04f} s.')  ## 1.0029 s
 print(f'Starting at time {time.strftime("%H:%M:%S", time.localtime())}')
 det_socket.send_json(dct_first)
-time.sleep(0.2)
+###time.sleep(0.2)
 while True:
     i += 1
     k += 1
@@ -70,11 +71,11 @@ while True:
     data_array_compressed = compress_lz4(data_array)
     det_socket.send_json(dct, flags=zmq.SNDMORE)
     det_socket.send(
-        data_array_compressed)  # in the meeting 1april, we said that I should have data_array.buffer as the input here but then I just get the error:  'numpy.ndarray' object has no attribute 'buffer'
+            data_array_compressed)  # in the meeting 1april, we said that I should have data_array.buffer as the input here but then I just get the error:  'numpy.ndarray' object has no attribute 'buffer'
     print(f'Sent frame nr. {i} at time {time.strftime("%H:%M:%S", time.localtime())}')
     print(f'---- data_array = {data_array}')
     print(f'---- data_array_compressed = {data_array_compressed}')
-    time.sleep(0.2)
+    ###time.sleep(0.2)
     if i == nframes - 1:
         i += 1
         k += 1
@@ -83,5 +84,5 @@ while True:
         print(f'Finished at time {time.strftime("%H:%M:%S", time.localtime())}')
         break
 
-time.sleep(10)
+###time.sleep(10)
 det_socket.close()
