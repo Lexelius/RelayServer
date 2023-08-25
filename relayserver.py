@@ -376,7 +376,9 @@ class RelayServer(object):
     #         return diff
 
 
-def launch(RS):
+def launch(RS=None):
+    if RS is None:
+        RS = RelayServer()
     # info about which hosts and ports to use are in gitlab>streaming-receiver>detector-config.json
     #     https://gitlab.maxiv.lu.se/scisw/detectors/streaming-receiver-cpp
     known_sources = {'Simulator': {'det_adr': 'tcp://0.0.0.0:56789', 'pos_adr': 'tcp://127.0.0.1:5556'},
@@ -395,7 +397,7 @@ def launch(RS):
 
     #pubout = RS.runpub.communicate()[0].decode().split('\n')
     #pushout = RS.runpush.communicate()[0].decode().split('\n')
-    return RS
+    return known_sources, src, relay_adr, RS
 
 if __name__ == "__main__":
     known_sources, src, relay_adr, RS = launch()
