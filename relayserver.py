@@ -16,6 +16,7 @@ import sys
 import os
 from ptypy import utils as u
 import inspect
+import h5py
 
 class RelayServer(object):
 
@@ -51,9 +52,11 @@ class RelayServer(object):
         self.load_replies = 0
         self.init_params = {}
         self.do_crop = None
+        self.do_pos_aver = None
         self.center = None
         self.newcenter = None
         self.sendimg = []
+        self.all_parts = [] ## DEBUG SOFTIMAX
         print(self.__dict__)
 
     def connect(self, detector_address, motors_address, relay_address, simulate):
@@ -91,7 +94,7 @@ class RelayServer(object):
                                            stdout=subprocess.PIPE,
                                            stderr=subprocess.STDOUT)
 
-        self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] == 'tcp://p-daq-cn-2'##'tcp://b-daq-node-2' ## used to determine how to decompress images
+        self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] == 'tcp://p-daq-cn-2' or 'tcp://p-fanout-softimax-xzyla-andor3'  ##'tcp://b-daq-node-2' ## used to determine how to decompress images
 
 
     def run(self):
@@ -127,17 +130,26 @@ class RelayServer(object):
                         print('********************* EIGER STARTING')
                     elif info['htype'] == 'image':
                         print(f'parts[1].buffer.nbytes = {parts[1].buffer.nbytes}')
+                        ##################################
+                        ## FOR NANOMAX
+                        ##################################
                         # Temporary fix for dealing with bitshuffle weirdness
-                        if self.decomp_from_byte12:
-                            ## This works when using modules at NanoMax, conda locally, but not with modules locally..
-                            ## However conda accepts any starting piont of the buffer and therefore gives wrong result.
-                            img = decompress_lz4(np.frombuffer(parts[1].buffer[12:], dtype=np.dtype('uint8')), info['shape'],
-                                                 np.dtype(info['type']))  ## This is what's working when using modules at NanoMax, but not with modules locally..
-                        else:
-                            ## This doesn't work when using modules at NanoMax, but works on conda locally, and with modules locally..
-                            img = decompress_lz4(np.frombuffer(parts[1].buffer, dtype=np.dtype('uint8')), info['shape'], np.dtype(info['type']))
+                        # if self.decomp_from_byte12:
+                        #     ## This works when using modules at NanoMax, conda locally, but not with modules locally..
+                        #     ## However conda accepts any starting piont of the buffer and therefore gives wrong result.
+                        #     img = decompress_lz4(np.frombuffer(parts[1].buffer[12:], dtype=np.dtype('uint8')), info['shape'],
+                        #                          np.dtype(info['type']))  ## This is what's working when using modules at NanoMax, but not with modules locally..
+                        # else:
+                        #     ## This doesn't work when using modules at NanoMax, but works on conda locally, and with modules locally..
+                        #     img = decompress_lz4(np.frombuffer(parts[1].buffer, dtype=np.dtype('uint8')), info['shape'], np.dtype(info['type']))
+                        ##################################
+                        ## FOR SOFTIMAX
+                        ##################################
+                        self.all_parts.append(parts)
+                        img = np.frombuffer(parts[1].buffer, dtype=np.dtype(info['type']))
+                        ##################################
                         #%#self.all_img.append(img)
-                        self.all_img[info['frame']] = img
+                        self.all_img[info['frame']] = img ## ToDo: this will not work for SoftMAX burst-mode
                         self.recieved_image_indices.append(info['frame'])
                         self.latest_det_index_received += 1
                     elif info['htype'] == 'series_end':
@@ -149,7 +161,7 @@ class RelayServer(object):
                     msg = self.pos_socket.recv_pyobj()
                     if msg['status'] == 'started':
                         print("\tmsg['status'] = motors started")
-                        self.Energy = msg['snapshot']['energy']
+                        self.Energy = msg['snapshot']['energy'] ### SOFTIMAX: key is 'beamline_energy'
                     elif msg['status'] == 'running':
                         j += 1
                         #%#self.all_msg.append(msg)
@@ -176,6 +188,13 @@ class RelayServer(object):
                         self.relay_socket.send_json(['Preprocess message received'])
                         self.do_crop = 'shape' in self.init_params.keys()
                         self.do_rebin = 'rebin' in self.init_params.keys()
+                        self.do_pos_aver = 'average_x_at_RS' in self.init_params.keys()
+                        self.do_masking = 'maskfile' in self.init_params.keys()
+                        if self.do_masking:
+                            maskfile = self.init_params['maskfile']
+                            with h5py.File(maskfile, 'r') as f:
+                                self.mask = f['mask'][:]
+
                         #!# self.do_rebin = ...
 
                     #!#
@@ -199,20 +218,27 @@ class RelayServer(object):
                         print('load')
                         self.frame_nr = request[1]['frame']
                         # Get the correct indices corresponding to the requested frame_nr
-                        sendmsg = [self.all_msg.pop(key) for key in self.frame_nr]
+                        sendmsg = [self.all_msg.get(key) for key in self.frame_nr]
                         #!###sendimg = np.array([self.crop(self.all_img.get(key)) for key in self.frame_nr]) #!# CHANGE get TO POP!
                         sendimg = np.array([self.all_img.get(key) for key in self.frame_nr])  # !# CHANGE get TO POP! BUT ADD DEBUG/TEST OPTION WHICH DOES USE GET!!
                         if self.do_crop:
                             sendimg, self.newcenter, self.padmask = self.crop(sendimg)
                             if self.load_replies == 0:
                                 sendmsg[0]['new_center'] = np.array(self.newcenter)
+                                if self.do_masking:
+                                    self.mask, newcenter, padmask = self.crop(self.mask)
+
                         if self.do_rebin:
                             try:
                                 weight = np.ones_like(sendimg)
                                 weight[np.where(sendimg == 2 ** 32 - 1)] = 0
                                 weight = u.rebin_2d(weight, self.init_params['rebin'])
                                 sendimg = u.rebin_2d(sendimg, self.init_params['rebin'])
-                                sendimg = np.array([sendimg, weight])
+                                if self.load_replies == 0 and self.do_masking:
+                                    self.mask = u.rebin_2d(self.mask, self.init_params['rebin'])
+                                    sendimg = np.array([sendimg, weight, self.mask])
+                                else:
+                                    sendimg = np.array([sendimg, weight])
                                 sendmsg[0]['RS_rebinned'] = True
                                 if self.newcenter is not None:
                                     sendmsg[0]['new_center'] = np.array(self.newcenter) / float(self.init_params['rebin'])
@@ -264,6 +290,8 @@ class RelayServer(object):
 
         Padding to make sure that diffraction center is in the image center
         is yet not implemented, but performed in ptypy.
+
+        ToDo: Check if ptypy incorporates mask when calculating center
 
         Parameters
         ----------
@@ -355,6 +383,34 @@ class RelayServer(object):
         else:
             return (np.sum(diff * mask * np.indices(diff.shape), axis=axes, dtype=float) / np.sum(diff * mask, dtype=float))[-2:]
 
+    def average_positions(self, sendmessage):
+        """
+        Used when there is 2 x- and y positions per diffraction image.
+        Averages two positions.
+
+        Currently hard coding the depth of these positions to be 2 levels down!
+        Started writing this function assuming that the 2 positions are in 2 separate messages!!!
+        :param sendmessage:
+        :return:
+        """
+        x_keys = self.init_params.average_x_at_RS.split('/')
+        y_keys = self.init_params.average_y_at_RS.split('/')
+        raw_x = np.array([sendmessage[pos][x_keys[0]][x_keys[1]] for pos in sendmessage.keys()])
+        raw_y = np.array([sendmessage[pos][y_keys[0]][x_keys[1]] for pos in sendmessage.keys()])
+
+        raw_x_t0 = raw_x[::2]  # position at the start of frame aquisition
+        raw_y_t0 = raw_y[::2]  # position at the start of frame aquisition
+        raw_x_t1 = raw_x[1::2]  # position at the end of frame aquisition
+        raw_y_t1 = raw_y[1::2]  # position at the end of frame aquisition
+        x_aver = (raw_x_t0 + raw_x_t1) / 2
+        y_aver = (raw_y_t0 + raw_y_t1) / 2
+
+        ## ToDo: Fix this part when you know how the positions
+        sendmessage_averpos = 0
+        return sendmessage_averpos
+
+
+
 # In progress:
     # def rebin(self, diff, return_weights=True):
     #     w = np.ones_like(diff_crop)
@@ -384,11 +440,15 @@ def launch(RS=None):
     known_sources = {'Simulator': {'det_adr': 'tcp://0.0.0.0:56789', 'pos_adr': 'tcp://127.0.0.1:5556'},
                    #'NanoMAX_eiger1M': {'det_adr': 'tcp://b-daq-node-2:20007', 'pos_adr': 'tcp://172.16.125.30:5556'},
                    'NanoMAX_eiger1M': {'det_adr': 'tcp://p-daq-cn-2:20007', 'pos_adr': 'tcp://172.16.125.30:5556'},
-                   'NanoMAX_eiger4M': {'det_adr': 'tcp://b-daq-node-2:20001', 'pos_adr': 'tcp://172.16.125.30:5556'}
+                   'NanoMAX_eiger4M': {'det_adr': 'tcp://b-daq-node-2:20001', 'pos_adr': 'tcp://172.16.125.30:5556'},
                     ## pos_adr for NanoMAX can also be: 'tcp://b-nanomax-controlroom-cc-3:5556'
+                     # need to login to blue network - SOFTIMAX to connect to det and pos
+                    'SoftiMAX_andor': {'det_adr': 'tcp://p-fanout-softimax-xzyla-andor3:10000', 'pos_adr': 'tcp://172.16.205.5:5556'} # det_adr: tcp://b-softimax-cams-0:20007, pos_adr: b-softimax-cc-0
                    }
-    src = known_sources['Simulator']
+    src = known_sources['SoftiMAX_andor']
     relay_adr = 'tcp://127.0.0.1:45678'
+
+
 
     # RS = RelayServer(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True)
     ## RS = RelayServer()
