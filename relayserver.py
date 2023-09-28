@@ -18,6 +18,34 @@ from ptypy import utils as u
 import inspect
 import h5py
 
+"""
+SoftiMAX notes:
+
+If running in burst mode with e.g. 2 frames then the pulled detector messages will be:
+    info['htype'] = 'header'
+    info['htype'] = 'image', info['frame'] = 0
+    info['htype'] = 'image', info['frame'] = 1
+    info['htype'] == 'series_end'
+    info['htype'] = 'header'
+    info['htype'] = 'image', info['frame'] = 0
+    ... etc.
+
+After a scan if finished, one may sometimes start a Live-mode of the detector which keeps sending
+frames through the zmq (but which are not saved to file), the info part of this message
+has the exact same format as the ones being sent during an actual scan, both when running and finishing, 
+the only difference is that in the starting message info['filename']='', i.e. this field is empty, 
+whereas it is not empty when a scan is starting/running either in burst mode or not! 
+One have to manually start and stop this live mode.
+To start Live-mode, do this in a terminal: 
+    ssh softimax-user@172.16.205.5
+    jive
+    # click on the tab 'device', then on the blue ring of 'B318A-EA01', and 'dia', 
+    # then double click on 'andor-zyla-01'
+    # Toggle the thing between 'Live' and 'Stop'
+Saved messages from starting, running, and stopping the Live-mode are storid in:
+'/home/reblex/Documents/Data/SavedRelayMessages/SoftiMAX-Messages/Random-msgs_2023-09-28__1_Live-mode'
+"""
+
 class RelayServer(object):
 
     recieved_image_indices: List[Any]
@@ -56,7 +84,8 @@ class RelayServer(object):
         self.center = None
         self.newcenter = None
         self.sendimg = []
-        self.all_parts = [] ## DEBUG SOFTIMAX
+        self.auto_rerun = True  # Start listening for new data again after the scan finishes
+        self.scannr = None
         print(self.__dict__)
 
     def connect(self, detector_address, motors_address, relay_address, simulate):
@@ -121,13 +150,13 @@ class RelayServer(object):
 
                 if self.det_socket in ready_sockets:
                     i += 1
-                    print(f'**** EIGER: {time.strftime("%H:%M:%S", time.localtime())}, {time.time()-self.t0} seconds')
+                    print(f'**** DETECTOR: {time.strftime("%H:%M:%S", time.localtime())}, {time.time()-self.t0} seconds')
                     parts = self.det_socket.recv_multipart(copy=False)
                     info = json.loads(parts[0].bytes)  ## makes a dict out of info_json
                     ### self.all_info.append(info)
                     print('info: ', info)
                     if info['htype'] == 'header':
-                        print('********************* EIGER STARTING')
+                        print('********************* DETECTOR STARTING')
                     elif info['htype'] == 'image':
                         print(f'parts[1].buffer.nbytes = {parts[1].buffer.nbytes}')
                         ##################################
@@ -143,13 +172,12 @@ class RelayServer(object):
                         #     ## This doesn't work when using modules at NanoMax, but works on conda locally, and with modules locally..
                         #     img = decompress_lz4(np.frombuffer(parts[1].buffer, dtype=np.dtype('uint8')), info['shape'], np.dtype(info['type']))
                         ##################################
-                        ## FOR SOFTIMAX
+                        ## FOR SOFTIMAX (no compression)
                         ##################################
-                        self.all_parts.append(parts)
-                        img = np.frombuffer(parts[1].buffer, dtype=np.dtype(info['type']))
+                        img = np.frombuffer(parts[1].buffer, dtype=np.dtype(info['type'])).reshape(info['shape'])
                         ##################################
                         #%#self.all_img.append(img)
-                        self.all_img[info['frame']] = img ## ToDo: this will not work for SoftMAX burst-mode
+                        self.all_img[self.latest_det_index_received] = img ##[info['frame']] = img ##
                         self.recieved_image_indices.append(info['frame'])
                         self.latest_det_index_received += 1
                     elif info['htype'] == 'series_end':
@@ -161,7 +189,8 @@ class RelayServer(object):
                     msg = self.pos_socket.recv_pyobj()
                     if msg['status'] == 'started':
                         print("\tmsg['status'] = motors started")
-                        self.Energy = msg['snapshot']['energy'] ### SOFTIMAX: key is 'beamline_energy'
+                        self.Energy = msg['snapshot']['beamline_energy'] ### SOFTIMAX: key is 'beamline_energy'
+                        self.scannr = msg['scannr']
                     elif msg['status'] == 'running':
                         j += 1
                         #%#self.all_msg.append(msg)
@@ -169,6 +198,10 @@ class RelayServer(object):
                     elif msg['status'] == 'finished':
                         self.end_of_scan = True
                         print("\tmsg['status'] = motors finished")
+                        print('\n\n')
+                    elif msg['status'] == 'interrupted':
+                        self.end_of_scan = True
+                        print("\tmsg['status'] = interrupted")
                         print('\n\n')
                     else:
                         print('Message was not important')
@@ -218,9 +251,9 @@ class RelayServer(object):
                         print('load')
                         self.frame_nr = request[1]['frame']
                         # Get the correct indices corresponding to the requested frame_nr
-                        sendmsg = [self.all_msg.get(key) for key in self.frame_nr]
+                        sendmsg = [self.all_msg.pop(key) for key in self.frame_nr]
                         #!###sendimg = np.array([self.crop(self.all_img.get(key)) for key in self.frame_nr]) #!# CHANGE get TO POP!
-                        sendimg = np.array([self.all_img.get(key) for key in self.frame_nr])  # !# CHANGE get TO POP! BUT ADD DEBUG/TEST OPTION WHICH DOES USE GET!!
+                        sendimg = np.array([self.all_img.pop(key) for key in self.frame_nr])  # !# CHANGE get TO POP! BUT ADD DEBUG/TEST OPTION WHICH DOES USE GET!!
                         if self.do_crop:
                             sendimg, self.newcenter, self.padmask = self.crop(sendimg)
                             if self.load_replies == 0:
@@ -283,6 +316,9 @@ class RelayServer(object):
         print(f'Closing the relay_socket at {time.strftime("%H:%M:%S", time.localtime())}! {time.time()-self.t0:.04f} seconds')
         self.relay_socket.close()
         self.running = False
+        if self.auto_rerun:  ## MAYBE MOVE THIS SOMEWHERE ELSE SO IT DOESN'T RESTART WHEN KeyboardInterrupt!!
+            self.__init__
+            self.run()
 
     def crop(self, diff, get_weights=True):
         """
