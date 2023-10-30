@@ -26,15 +26,20 @@ pos_socket.bind(f'{pos_host}:{pos_port}')  ## ("tcp://172.16.125.30:5556")# ("tc
 
 # %% Pre-load the data that will be used to simulate the stream
 
-scans = {0: {'scan_file': '/data/visitors/nanomax/20220196/2022040308/raw/mar29_KB_align/scan_000490_eiger.hdf5', 'detector': 'eiger'},
-         1: {'scan_file': '/data/visitors/nanomax/20211244/2021120808/raw/0000_setup/scan_000036_eiger.hdf5', 'detector': 'eiger'},
-         2: {'scan_file': '/home/reblex/Documents/Data/SavedRelayMessages/20220824/raw/sample/scan_000029_eiger1m.hdf5', 'detector': 'eiger1m'},
-         3: {'scan_file': '/home/reblex/Documents/Data/nanomax_siemens_KB/scan_000006_eiger.hdf5', 'detector': 'eiger'},
-         4: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/scan_000038_eiger1m.hdf5', 'detector': 'eiger1m'},
-         5: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/scan_000040_eiger1m.hdf5', 'detector': 'eiger1m'},
-         6: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/sliced_scan_000040/scan_000040_eiger1m.hdf5', 'detector': 'eiger1m'}
+scans = {0: {'scan_file': '/data/visitors/nanomax/20220196/2022040308/raw/mar29_KB_align/scan_000490_eiger.hdf5',           'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger'},    # 27 frames
+         1: {'scan_file': '/data/visitors/nanomax/20211244/2021120808/raw/0000_setup/scan_000036_eiger.hdf5',               'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger'},    # 1000 frames
+         2: {'scan_file': '/home/reblex/Documents/Data/SavedRelayMessages/20220824/raw/sample/scan_000029_eiger1m.hdf5',    'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger1m'},  # 16 frames
+         3: {'scan_file': '/home/reblex/Documents/Data/nanomax_siemens_KB/scan_000006_eiger.hdf5',                          'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger'},    # 100 frames
+         4: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/scan_000038_eiger1m.hdf5',                    'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger1m'},  # 55 frames
+         5: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/scan_000040_eiger1m.hdf5',                    'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger1m'},  # 55 frames
+         6: {'scan_file': '/home/reblex/Documents/Data/NM_livebeam_2022-11-01/sliced_scan_000040/scan_000040_eiger1m.hdf5', 'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger1m'},  # 15 frames
+         7: {'scan_file': '/data/visitors/softimax/20230687/2023092608/raw/20230930/scan_000754_andor.h5',                  'path_to_data': '/entry/instrument/zyla/data',   'detector': 'andor'},    # 11 frames, just a loopscan
+         8: {'scan_file': '/data/visitors/softimax/20230687/2023092608/raw/20230930/scan_000778_andor.h5',                  'path_to_data': '/entry/instrument/zyla/data',   'detector': 'andor'},    # 200 frames, spiralscan, burst=1
+         9: {'scan_file': '/data/visitors/softimax/20230687/2023092608/raw/20230927/scan_000118_andor.h5',                  'path_to_data': '/entry/instrument/zyla/data',   'detector': 'andor'},    # 1046 frames, fermatscan, burst=1, Has a good off-line reconstruction!
+         10: {'scan_file': '/data/visitors/softimax/20230687/2023092608/raw/20230930/scan_000853_andor.h5',                 'path_to_data': '/entry/instrument/zyla/data',   'detector': 'andor'},    # 220 frames, fermatscan, burst=1, haven't checked recons
+         11: {'scan_file': '/data/visitors/softimax/20230687/2023092608/raw/20230930/scan_000702_andor.h5',                 'path_to_data': '/entry/instrument/zyla/data',   'detector': 'andor'},    # 306 frames, fermatscanoff, burst=1, haven't checked recons
          }
-sample = 6  ######## Pick your sample here!
+sample = 9  ######## Pick your sample here! 0:27fr, 1:1000fr, 2:16fr, 3:100fr, 4:55fr, 5:55fr, 6:15fr
 scan_fname = scans[sample]['scan_file']
 path, scannr = re.findall(r'/.{0,}/|\d{6}', scan_fname)  # ToDo: use os.path.split(scan_fname)
 h5_fname = path + scannr + '.h5'
@@ -67,6 +72,8 @@ def divide_msgs(dct, i):
         if isinstance(v, np.ndarray):
             if k == 'thumbs:':
                 d[k] = v[i].base  # converts b'None' into None
+            elif k in dct.keys():
+                d[k] = v[i:i + 1][0]  # store values at top level as float and not as arrays
             else:
                 d[k] = v[i:i + 1]
     dct['status'] = 'running'
@@ -74,11 +81,18 @@ def divide_msgs(dct, i):
 
 
 # Correcting the ['eiger']['frames'] outside divide_msgs to avoid unnecessary copy:
+# I don't think there's a way to tell if universal should be True or False when reading the files.
 msgs_prepped = copy.deepcopy(msgs)
-msgs_prepped[scans[sample]['detector']]['frames'] = {'type':      'Link',
-                                                     'filename':  scan_fname,
-                                                     'path':      'entry/measurement/Eiger/data',
-                                                     'universal': True}
+if 'eiger' in scans[sample]['detector']:
+    msgs_prepped[scans[sample]['detector']]['frames'] = {'type':      'Link',
+                                                         'filename':  scan_fname,
+                                                         'path':      scans[sample]['path_to_data'], #'entry/measurement/Eiger/data',
+                                                         'universal': True}
+elif 'andor' in scans[sample]['detector']:
+    msgs_prepped[scans[sample]['detector']] = {'type':      'Link',
+                                               'filename':  scan_fname,
+                                               'path':      scans[sample]['path_to_data'],
+                                               'universal': True}
 
 msgs_divided = list(map(lambda i: divide_msgs(copy.deepcopy(msgs_prepped), i), nr))
 ## Using scans[0] with 27 frames gave:
@@ -86,23 +100,40 @@ msgs_divided = list(map(lambda i: divide_msgs(copy.deepcopy(msgs_prepped), i), n
 # 4.17 ms ± 342 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
 
 
-# %% Start sending data
-
 initial_msg = {'scannr': scannr, 'status': 'started', 'path': path.rstrip('/'), 'snapshot': h5_data['snapshot'], 'description': h5_data['description']}
 last_msg = {'scannr': scannr, 'status': 'finished', 'path': path.rstrip('/'), 'snapshot': h5_data['snapshot'], 'description': h5_data['description']}
+
+# Store values as float and not as arrays (as it is in the streamed messages):
+snap = h5_data['snapshot'].copy()
+for key, val in snap.items():
+    snap[key] = val[0]
+
+initial_msg = {'scannr': int(scannr),
+               'status': 'started',
+               'path': path.rstrip('/'),
+               'snapshot': snap,
+               'description': h5_data['description'][0].decode('utf-8')}
+
+last_msg = {'scannr': int(scannr),
+            'status': 'finished',
+            'path': path.rstrip('/'),
+            'snapshot': snap,
+            'description': h5_data['description'][0].decode('utf-8')}
+
+# %% Start sending data
 
 ###time.sleep(1.3)  # naive wait for clients to arrive
 t1 = time.time()
 print(f'Prepping the contrast simulator took {t1 - t0:.04f} s.')
 print(f'Starting at time {time.strftime("%H:%M:%S", time.localtime())}')
 pos_socket.send_pyobj(initial_msg)
-###time.sleep(0.2)
+time.sleep(0.2)
 
 i = -1
 for i in range(nframes):
     pos_socket.send_pyobj(OrderedDict(msgs_divided[i]))
     print(f'Sent frame nr. {i} at time {time.strftime("%H:%M:%S", time.localtime())}')
-###    time.sleep(0.2)
+    time.sleep(0.6)
 
 pos_socket.send_pyobj(last_msg)
 print(f'Finished at time {time.strftime("%H:%M:%S", time.localtime())}')
