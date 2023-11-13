@@ -10,7 +10,8 @@ import copy
 import re
 from ptypy import io
 import time
-
+from ptypy import utils as u   ###DEBUG
+logger = u.verbose.logger   ###DEBUG
 # %%
 """
 Script used to simulate the stream containing motor related data, such as positions and energy.
@@ -38,8 +39,9 @@ scans = {0: {'scan_file': '/data/visitors/nanomax/20220196/2022040308/raw/mar29_
          9: {'scan_file': '/data/visitors/softimax/20230687/2023092608/raw/20230927/scan_000118_andor.h5',                  'path_to_data': '/entry/instrument/zyla/data',   'detector': 'andor'},    # 1046 frames, fermatscan, burst=1, Has a good off-line reconstruction!
          10: {'scan_file': '/data/visitors/softimax/20230687/2023092608/raw/20230930/scan_000853_andor.h5',                 'path_to_data': '/entry/instrument/zyla/data',   'detector': 'andor'},    # 220 frames, fermatscan, burst=1, haven't checked recons
          11: {'scan_file': '/data/visitors/softimax/20230687/2023092608/raw/20230930/scan_000702_andor.h5',                 'path_to_data': '/entry/instrument/zyla/data',   'detector': 'andor'},    # 306 frames, fermatscanoff, burst=1, haven't checked recons
+         12: {'scan_file': '/data/visitors/nanomax/20211244/2023020108/raw/0003_setup/scan_001190_eiger4m.hdf5',            'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'}   # 2912 frames, fermatscan
          }
-sample = 9  ######## Pick your sample here! 0:27fr, 1:1000fr, 2:16fr, 3:100fr, 4:55fr, 5:55fr, 6:15fr
+sample = 12  ######## Pick your sample here! 0:27fr, 1:1000fr, 2:16fr, 3:100fr, 4:55fr, 5:55fr, 6:15fr
 scan_fname = scans[sample]['scan_file']
 path, scannr = re.findall(r'/.{0,}/|\d{6}', scan_fname)  # ToDo: use os.path.split(scan_fname)
 h5_fname = path + scannr + '.h5'
@@ -82,7 +84,7 @@ def divide_msgs(dct, i):
 
 # Correcting the ['eiger']['frames'] outside divide_msgs to avoid unnecessary copy:
 # I don't think there's a way to tell if universal should be True or False when reading the files.
-msgs_prepped = copy.deepcopy(msgs)
+msgs_prepped = msgs.copy() ## deepcopy unneccessary her and takes alot of time! # copy.deepcopy(msgs)
 if 'eiger' in scans[sample]['detector']:
     msgs_prepped[scans[sample]['detector']]['frames'] = {'type':      'Link',
                                                          'filename':  scan_fname,
@@ -99,25 +101,39 @@ msgs_divided = list(map(lambda i: divide_msgs(copy.deepcopy(msgs_prepped), i), n
 # %timeit msgs_divided = list(map(lambda i: divide_msgs(copy.deepcopy(msgs_prepped), i), nr))
 # 4.17 ms ± 342 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
 
-
-initial_msg = {'scannr': scannr, 'status': 'started', 'path': path.rstrip('/'), 'snapshot': h5_data['snapshot'], 'description': h5_data['description']}
-last_msg = {'scannr': scannr, 'status': 'finished', 'path': path.rstrip('/'), 'snapshot': h5_data['snapshot'], 'description': h5_data['description']}
+if scans[sample]['detector'] == 'eiger4m':
+    initial_msg = {'scannr': scannr, 'status': 'started', 'path': path.rstrip('/'), 'snapshots': h5_data['snapshots']['pre_scan'], 'description': h5_data['description']}
+    last_msg = {'scannr': scannr, 'status': 'finished', 'path': path.rstrip('/'), 'snapshots': h5_data['snapshots']['post_scan'], 'description': h5_data['description']}
+    # Store values as float and not as arrays (as it is in the streamed messages):
+    snap_pre = h5_data['snapshots']['pre_scan'].copy()
+    snap_post = h5_data['snapshots']['post_scan'].copy()
+    for key, val in snap_pre.items():
+        snap_pre[key] = val[0]
+    for key, val in snap_post.items():
+        snap_post[key] = val[0]
+else:
+    initial_msg = {'scannr': scannr, 'status': 'started', 'path': path.rstrip('/'), 'snapshot': h5_data['snapshot'], 'description': h5_data['description']}
+    last_msg = {'scannr': scannr, 'status': 'finished', 'path': path.rstrip('/'), 'snapshot': h5_data['snapshot'], 'description': h5_data['description']}
+    # Store values as float and not as arrays (as it is in the streamed messages):
+    snap = h5_data['snapshot'].copy()
+    for key, val in snap.items():
+        snap[key] = val[0]
 
 # Store values as float and not as arrays (as it is in the streamed messages):
-snap = h5_data['snapshot'].copy()
-for key, val in snap.items():
-    snap[key] = val[0]
+# snap = h5_data['snapshot'].copy()
+# for key, val in snap.items():
+#     snap[key] = val[0]
 
 initial_msg = {'scannr': int(scannr),
                'status': 'started',
                'path': path.rstrip('/'),
-               'snapshot': snap,
+               'snapshot': snap_pre if scans[sample]['detector'] == 'eiger4m' else snap,
                'description': h5_data['description'][0].decode('utf-8')}
 
 last_msg = {'scannr': int(scannr),
             'status': 'finished',
             'path': path.rstrip('/'),
-            'snapshot': snap,
+            'snapshot': snap_post if scans[sample]['detector'] == 'eiger4m' else snap,
             'description': h5_data['description'][0].decode('utf-8')}
 
 # %% Start sending data
@@ -132,8 +148,9 @@ time.sleep(0.2)
 i = -1
 for i in range(nframes):
     pos_socket.send_pyobj(OrderedDict(msgs_divided[i]))
-    print(f'Sent frame nr. {i} at time {time.strftime("%H:%M:%S", time.localtime())}')
-    time.sleep(0.6)
+    #logger.log(12345, f'Sent frame nr. {i} at time {time.strftime("%H:%M:%S", time.localtime())}')
+    print(f'Sent frame nr. {i} at time {time.strftime("%H:%M:%S", time.localtime())}', flush=True)
+    #time.sleep(0.6)
 
 pos_socket.send_pyobj(last_msg)
 print(f'Finished at time {time.strftime("%H:%M:%S", time.localtime())}')
