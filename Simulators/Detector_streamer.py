@@ -23,8 +23,9 @@ scans = {0: {'scan_file': '/data/visitors/nanomax/20220196/2022040308/raw/mar29_
          9: {'scan_file': '/data/visitors/softimax/20230687/2023092608/raw/20230927/scan_000118_andor.h5',                  'path_to_data': '/entry/instrument/zyla/data',   'detector': 'andor'},    # 1046 frames, fermatscan, burst=1, Has a good off-line reconstruction!
          10: {'scan_file': '/data/visitors/softimax/20230687/2023092608/raw/20230930/scan_000853_andor.h5',                 'path_to_data': '/entry/instrument/zyla/data',   'detector': 'andor'},    # 220 frames, fermatscan, burst=1, haven't checked recons
          11: {'scan_file': '/data/visitors/softimax/20230687/2023092608/raw/20230930/scan_000702_andor.h5',                 'path_to_data': '/entry/instrument/zyla/data',   'detector': 'andor'},    # 306 frames, fermatscanoff, burst=1, haven't checked recons
+         12: {'scan_file': '/data/visitors/nanomax/20211244/2023020108/raw/0003_setup/scan_001190_eiger4m.hdf5',            'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'}   # 2912 frames, fermatscan
          }
-sample = 9  ######## Pick your sample here! 0:27fr, 1:1000fr, 2:16fr, 3:100fr, 4:55fr, 5:55fr, 6:15fr
+sample = 12  ######## Pick your sample here! 0:27fr, 1:1000fr, 2:16fr, 3:100fr, 4:55fr, 5:55fr, 6:15fr
 scan_fname = scans[sample]['scan_file']
 path, scannr = re.findall(r'/.{0,}/|\d{6}', scan_fname)
 data = io.h5read(scan_fname, scans[sample]['path_to_data'])[scans[sample]['path_to_data']]
@@ -81,8 +82,8 @@ while True:
             det_socket.send_json(dct, flags=zmq.SNDMORE)
             det_socket.send(data_array_compressed)  # in the meeting 1april, we said that I should have data_array.buffer as the input here but then I just get the error:  'numpy.ndarray' object has no attribute 'buffer'
             print(f'Sent frame nr. {i} at time {time.strftime("%H:%M:%S", time.localtime())}')
-            print(f'---- data_array = {data_array}')
-            print(f'---- data_array_compressed = {data_array_compressed}')
+            # print(f'---- data_array = {data_array}')
+            # print(f'---- data_array_compressed = {data_array_compressed}')
         elif compr == 'none':
             det_socket.send_json(dct, flags=zmq.SNDMORE)
             det_socket.send(data_array)  # in the meeting 1aprildet, we said that I should have data_array.buffer as the input here but then I just get the error:  'numpy.ndarray' object has no attribute 'buffer'
@@ -91,7 +92,7 @@ while True:
             # print(f'---- data_array = {data_array_str}')
 
 
-        time.sleep(0.6)
+        #time.sleep(0.6)
         if i == nframes - 1:
             i += 1
             k += 1
