@@ -18,7 +18,7 @@ from ptypy import utils as u
 import inspect
 import h5py
 import copy
-
+# ToDo: 2021-12-08: Fix cropping-> find_center so it works properly whith masking!
 
 class RelayServer(object):
     recieved_image_indices: List[Any]
@@ -95,14 +95,17 @@ class RelayServer(object):
 
         # Start simulating an ongoing experiment
         if simulate:
+            self.poslogfile = open(self.RS_path + '/debug_logs/motor_log.txt', "w")
+            self.detlogfile = open(self.RS_path + '/debug_logs/detector_log.txt', "w")
+
             self.runpub = subprocess.Popen([sys.executable, self.RS_path + '/Simulators/Motor_streamer.py'],
-                                           stdout=subprocess.PIPE,
+                                           stdout=self.poslogfile,  #subprocess.DEVNULL, #subprocess.PIPE,
                                            stderr=subprocess.STDOUT)
             self.runpush = subprocess.Popen([sys.executable, self.RS_path + '/Simulators/Detector_streamer.py'],
-                                            stdout=subprocess.PIPE,
+                                            stdout=self.detlogfile,  #subprocess.PIPE,
                                             stderr=subprocess.STDOUT)
 
-        self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] == 'tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se'  # 'tcp://p-daq-cn-2'  ##'tcp://b-daq-node-2' ## used to determine how to decompress images
+        self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] in ['tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se', 'tcp://p-nanomax-eiger-4m-daq.maxiv.lu.se']  # 'tcp://p-daq-cn-2'  ##'tcp://b-daq-node-2' ## used to determine how to decompress images
 
     def run(self):
         # ToDO: Add some assertion/check that sockets have been connected before continuing from here.
@@ -136,14 +139,14 @@ class RelayServer(object):
                     self.det_action()
                     t1 = time.perf_counter()  ### DEBUG
                     self.dettottime += t1 - t0  ### DEBUG
-                    print(('Time spent in det_action() = %f, accumulated time = %f' % ((t1 - t0), self.dettottime)))  ### DEBUG
+                    print(('Time spent in det_action() = %f, accumulated time = %f\n' % ((t1 - t0), self.dettottime)))  ### DEBUG
 
                 if self.pos_socket in ready_sockets:
                     t0 = time.perf_counter()  ### DEBUG
                     self.pos_action()
                     t1 = time.perf_counter()  ### DEBUG
                     self.postottime += t1 - t0  ### DEBUG
-                    print(('Time spent in pos_action() = %f, accumulated time = %f' % ((t1 - t0), self.postottime)))  ### DEBUG
+                    print(('Time spent in pos_action() = %f, accumulated time = %f\n' % ((t1 - t0), self.postottime)))  ### DEBUG
 
                 if self.relay_socket in ready_sockets:
                     t0 = time.perf_counter()  ### DEBUG
@@ -189,15 +192,23 @@ class RelayServer(object):
                         print('load')
                         self.frame_nr = request[1]['frame']
                         # Get the correct indices corresponding to the requested frame_nr
+                        print('Debug 1')
                         sendmsg = [self.all_msg.pop(key) for key in self.frame_nr]
                         # !###sendimg = np.array([self.crop(self.all_img.get(key)) for key in self.frame_nr]) #!# CHANGE get TO POP!
+                        print('Debug 2')
                         sendimg = np.array([self.all_img.pop(key) for key in self.frame_nr])  # !# CHANGE get TO POP! BUT ADD DEBUG/TEST OPTION WHICH DOES USE GET!!
+                        print('Debug 3')
                         if self.do_crop:
                             sendimg, self.newcenter, self.padmask = self.crop(sendimg)
+                            print('Debug 4')
                             if self.load_replies == 0:
+                                print('Debug 5')
                                 sendmsg[0]['new_center'] = np.array(self.newcenter)
+                                print('Debug 6')
                                 if self.do_masking:
+                                    print('Debug 7')
                                     self.mask, newcenter, padmask = self.crop(self.mask)
+                                    print('Debug 8')
 
                         if self.do_rebin:
                             try:
@@ -225,7 +236,7 @@ class RelayServer(object):
                         sendmsg[0]['shape'] = sendimg.shape  # Used for decompressing image in LS
                         print('DEBUG 4')
                         self.relay_socket.send_pyobj(sendmsg, flags=zmq.SNDMORE)
-                        print(f'DEBUG 5, ')
+                        print(f'DEBUG 5, sendimg.shape: {sendimg.shape}, sendimg.dtype: {sendimg.dtype}, sendimg[0].dtype: {sendimg[0].dtype}')
                         self.relay_socket.send(compress_lz4(sendimg), copy=True)
                         print('DEBUG 6')
                         self.load_replies += 1
@@ -253,6 +264,7 @@ class RelayServer(object):
                 print('Error: ', err)
                 self.stop()
                 self.stop_outstream()
+                raise err
 
     def det_action(self):
         self.i += 1
@@ -296,7 +308,7 @@ class RelayServer(object):
                 else:
                     print(f"Unknown compression type: {info['compression']}")
 
-                # %#self.all_img.append(img)
+                        # %#self.all_img.append(img)
                 self.latest_det_index_received += 1
                 self.all_img[self.latest_det_index_received] = img  ##[info['frame']] = img ##
                 self.recieved_image_indices.append(info['frame'])
@@ -541,13 +553,14 @@ def launch(RS=None):
     known_sources = {'Simulator':       {'det_adr': 'tcp://0.0.0.0:56789', 'pos_adr': 'tcp://127.0.0.1:5556'},
                      # 'NanoMAX_eiger1M': {'det_adr': 'tcp://b-daq-node-2:20007', 'pos_adr': 'tcp://172.16.125.30:5556'},
                      #                   'NanoMAX_eiger1M': {'det_adr': 'tcp://p-daq-cn-2:20007', 'pos_adr': 'tcp://172.16.125.30:5556'},
-                     'NanoMAX_eiger4M': {'det_adr': 'tcp://b-daq-node-2:20001', 'pos_adr': 'tcp://172.16.125.30:5556'},
-                     'NanoMAX_eiger1M': {'det_adr': 'tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se:5556', 'pos_adr': 'tcp://172.16.125.30:5556'}, 'NanoMAX_eiger4M': {'det_adr': 'tcp://b-daq-node-2:20001', 'pos_adr': 'tcp://172.16.125.30:5556'},
+                     #'NanoMAX_eiger4M': {'det_adr': 'tcp://b-daq-node-2:20001', 'pos_adr': 'tcp://172.16.125.30:5556'},
+                     'NanoMAX_eiger1M': {'det_adr': 'tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se:5556', 'pos_adr': 'tcp://172.16.125.30:5556'},
+                     'NanoMAX_eiger4M': {'det_adr': 'tcp://p-nanomax-eiger-4m-daq.maxiv.lu.se:5556', 'pos_adr': 'tcp://172.16.125.30:5556'},
                      ## pos_adr for NanoMAX can also be: 'tcp://b-nanomax-controlroom-cc-3:5556'
                      # need to login to blue network - SOFTIMAX to connect to det and pos
                      'SoftiMAX_andor':  {'det_adr': 'tcp://p-fanout-softimax-xzyla-andor3:10000', 'pos_adr': 'tcp://172.16.205.5:5556'}  # det_adr: tcp://b-softimax-cams-0:20007, pos_adr: b-softimax-cc-0
                      }
-    src = known_sources['Simulator']
+    src = known_sources['NanoMAX_eiger4M']
     relay_adr = 'tcp://127.0.0.1:45678'
 
     # RS = RelayServer(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True)
@@ -562,6 +575,8 @@ def launch(RS=None):
 
 if __name__ == "__main__":
     known_sources, src, relay_adr, RS = launch()
+    RS.poslogfile.close()
+    RS.detlogfile.close()
     # pubout = RS.runpub.communicate()[0].decode().split('\n')
     # pushout = RS.runpush.communicate()[0].decode().split('\n')
     # print(pushout[:10])
