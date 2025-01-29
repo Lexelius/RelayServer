@@ -1,9 +1,9 @@
 # RelayServer
 
-In progress..
-
 Intended to be used together with 
-https://github.com/Lexelius/ptypy/tree/livescan
+https://github.com/ptycho/ptypy/tree/livescan_maxiv  
 
- ![Relay_image1](https://user-images.githubusercontent.com/60934697/193571321-9c74f8f7-a609-4bc6-ac7a-6b764aa144db.png)
 
+![Relay_overview](https://github.com/user-attachments/assets/e95de032-6107-4bd8-911c-86e001fef0a0)
+
+Tested using Python 3.8.6.
