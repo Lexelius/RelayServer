@@ -54,6 +54,7 @@ class RelayServer(object):
         self.init_params = {}
         self.do_crop = None
         self.do_pos_aver = None
+        self.do_divide_msgs = False
         self.center = None
         self.newcenter = None
         self.sendimg = []
@@ -82,6 +83,7 @@ class RelayServer(object):
 
         """
         print(f'Starting Relay server, reading from detector address {detector_address} and positions address {motors_address}')
+        self.simulate = simulate
         context = zmq.Context()
         self.det_socket = context.socket(zmq.PULL)
         self.det_socket.connect(detector_address)  ## ('tcp://b-daq-node-2:20001')
@@ -95,6 +97,7 @@ class RelayServer(object):
 
         # Start simulating an ongoing experiment
         if simulate:
+            os.makedirs(self.RS_path + '/debug_logs', exist_ok=True)
             self.poslogfile = open(self.RS_path + '/debug_logs/motor_log.txt', "w")
             self.detlogfile = open(self.RS_path + '/debug_logs/detector_log.txt', "w")
 
@@ -326,7 +329,15 @@ class RelayServer(object):
                     self.Energy = msg['snapshot']['energy']  ### NANOMAX: key is 'energy'
                 elif 'beamline_energy' in msg['snapshot'].keys():
                     self.Energy = msg['snapshot']['beamline_energy']  ### SOFTIMAX: key is 'beamline_energy'
-                self.motors_started = True
+                if 'wffermat ' in msg['description'] and not self.simulate:
+                    # Then all positions will come in a single msg
+                    self.do_divide_msgs = True
+                if 'csnake' in msg['description']:
+                    # We don't want the csnake data! NOTE: STILL HAVE TO FIX THIS PART FOR THE DETECTOR!
+                    self.detector_started = False
+                    self.all_img = {}
+                else:
+                    self.motors_started = True
             else:
                 print('Message was not important')
         else:
@@ -334,11 +345,16 @@ class RelayServer(object):
                 self.j += 1
                 self.latest_pos_index_received += 1
                 self.all_msg[self.j] = msg
-                # msgs = self.divide_burst_msg(msg)
-                # # %#self.all_msg.append(msg)
-                # for k in range(self.j, self.j + len(msgs)):
-                #     self.all_msg[k] = msg  # %#
-                # self.j = len(self.all_msg)
+                if self.do_divide_msgs:
+                    print('Will divide position message!')
+                    self.all_msg = self.divide_burst_msg(msg)
+                    self.latest_pos_index_received = len(self.all_msg)-1
+                    # msgs = self.divide_burst_msg(msg)
+                    # # %#self.all_msg.append(msg)
+                    # # %#self.all_msg.append(msg)
+                    # for k in range(self.j, self.j + len(msgs)):
+                    #     self.all_msg[k] = msg  # %#
+                    # self.j = len(self.all_msg)
             elif msg['status'] == 'finished':
                 self.end_of_scan = True
                 print("\tmsg['status'] = motors finished")
@@ -354,11 +370,11 @@ class RelayServer(object):
             print(f'\t {str(key + ":").ljust(15)} {str(value)}')
 
     def divide_burst_msg(self, msg_burst):
-        xMotor = 'panda0/INENC1.VAL_Value'  ### HARDCODING
+        xMotor = 'pseudo/x'  ### HARDCODING
         xMotorKeys = xMotor.split('/')  ### HARDCODING
         n_burst = msg_burst[xMotorKeys[0]][xMotorKeys[1]].__len__()
         nr = np.linspace(0, n_burst - 1, n_burst, dtype=int)
-        msgs_divided = list(map(lambda i: self.divide_msgs(copy.deepcopy(msg_burst), i), nr))
+        msgs_divided = dict(zip(nr, map(lambda i: self.divide_msgs(copy.deepcopy(msg_burst), i), nr)))
         return msgs_divided
 
     def walk_dict(self, dct):
@@ -560,7 +576,7 @@ def launch(RS=None):
                      # need to login to blue network - SOFTIMAX to connect to det and pos
                      'SoftiMAX_andor':  {'det_adr': 'tcp://p-fanout-softimax-xzyla-andor3:10000', 'pos_adr': 'tcp://172.16.205.5:5556'}  # det_adr: tcp://b-softimax-cams-0:20007, pos_adr: b-softimax-cc-0
                      }
-    src = known_sources['NanoMAX_eiger4M']
+    src = known_sources['Simulator']
     relay_adr = 'tcp://127.0.0.1:45678'
 
     # RS = RelayServer(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True)
