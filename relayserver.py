@@ -4,7 +4,6 @@ from typing import List, Any
 import zmq
 from bitshuffle import decompress_lz4
 from bitshuffle import compress_lz4
-import numpy as np
 import select
 import time
 import bitshuffle
@@ -18,22 +17,17 @@ from ptypy import utils as u
 import inspect
 import h5py
 import copy
+import logging
 # ToDo: 2021-12-08: Fix cropping-> find_center so it works properly whith masking!
 
 class RelayServer(object):
     recieved_image_indices: List[Any]
 
-    def __init__(self):
+    def __init__(self, verbosity):
         """ Declares necessary variables. """
         self.t0 = time.time()
-        # if simulate == True:
-        #         self.runpub = subprocess.Popen([sys.executable, '/home/reblex/RelayServer/Simulators/Motor_streamer.py'],
-        #                                   stdout=subprocess.PIPE,
-        #                                   stderr=subprocess.STDOUT)
-        #         self.runpush = subprocess.Popen([sys.executable, '/home/reblex/RelayServer/Simulators/Detector_streamer.py'],
-        #                                    stdout=subprocess.PIPE,
-        #                                    stderr=subprocess.STDOUT)
 
+        logging.basicConfig(stream=sys.stdout, level=verbosity, format='%(levelname)s: %(message)s')
         # Initialize parameters
         self.RS_path = os.path.dirname(os.path.abspath(inspect.stack()[0][1]))
         self.running = None
@@ -102,10 +96,10 @@ class RelayServer(object):
             self.detlogfile = open(self.RS_path + '/debug_logs/detector_log.txt', "w")
 
             self.runpub = subprocess.Popen([sys.executable, self.RS_path + '/Simulators/Motor_streamer.py'],
-                                           stdout=self.poslogfile,  #subprocess.DEVNULL, #subprocess.PIPE,
+                                           stdout=self.poslogfile,
                                            stderr=subprocess.STDOUT)
             self.runpush = subprocess.Popen([sys.executable, self.RS_path + '/Simulators/Detector_streamer.py'],
-                                            stdout=self.detlogfile,  #subprocess.PIPE,
+                                            stdout=self.detlogfile,
                                             stderr=subprocess.STDOUT)
 
         self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] in ['tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se', 'tcp://p-nanomax-eiger-4m-daq.maxiv.lu.se']  # 'tcp://p-daq-cn-2'  ##'tcp://b-daq-node-2' ## used to determine how to decompress images
@@ -117,10 +111,6 @@ class RelayServer(object):
         self.running = True
         while self.running:
             try:
-                # !#try:
-                # !#self.latest_posimg_index_received.append([self.latest_pos_index_received, self.latest_det_index_received, self.recieved_image_indices[-1]])
-                # !#except:
-                # !#pass
                 print('')
                 print('receiving...')
                 print('Received %d positions and %d images\r' % (self.latest_pos_index_received + 1, self.latest_det_index_received + 1), end='')
@@ -142,14 +132,14 @@ class RelayServer(object):
                     self.det_action()
                     t1 = time.perf_counter()  ### DEBUG
                     self.dettottime += t1 - t0  ### DEBUG
-                    print(('Time spent in det_action() = %f, accumulated time = %f\n' % ((t1 - t0), self.dettottime)))  ### DEBUG
+                    logging.debug(('Time spent in det_action() = %f, accumulated time = %f\n' % ((t1 - t0), self.dettottime)))  ### DEBUG
 
                 if self.pos_socket in ready_sockets:
                     t0 = time.perf_counter()  ### DEBUG
                     self.pos_action()
                     t1 = time.perf_counter()  ### DEBUG
                     self.postottime += t1 - t0  ### DEBUG
-                    print(('Time spent in pos_action() = %f, accumulated time = %f\n' % ((t1 - t0), self.postottime)))  ### DEBUG
+                    logging.debug(('Time spent in pos_action() = %f, accumulated time = %f\n' % ((t1 - t0), self.postottime)))  ### DEBUG
 
                 if self.relay_socket in ready_sockets:
                     t0 = time.perf_counter()  ### DEBUG
@@ -172,9 +162,7 @@ class RelayServer(object):
                             with h5py.File(maskfile, 'r') as f:
                                 self.mask = f['mask'][:]
 
-                        # !# self.do_rebin = ...
 
-                    # !#
                     if request[0] == 'check_energy':
                         if not self.energy_replied and self.Energy != None:
                             self.relay_socket.send_json({'energy': float(self.Energy)})
@@ -185,33 +173,33 @@ class RelayServer(object):
                             self.relay_socket.send_json({'energy': False})
                     elif request[0] == 'check':
                         print('check')
-                        print('inside REQ2')  ### DEBUG
+                        logging.debug('inside REQ2')  ### DEBUG
                         frames_accessible = list(set(list(self.all_msg.keys())).intersection(list(self.all_img.keys())))
-                        frames_accessible_tot = len(frames_accessible)  # !# ToDo: LS MUST BE UPDATED: Now sending nr of NEW frames accessible!!!
-                        print(f'sending [int(frames_accessible_tot), self.end_of_scan and self.end_of_det_stream] = {[int(frames_accessible_tot), self.end_of_scan and self.end_of_det_stream]}')  ### DEBUG
+                        frames_accessible_tot = len(frames_accessible)
+                        logging.debug(f'sending [int(frames_accessible_tot), self.end_of_scan and self.end_of_det_stream] = {[int(frames_accessible_tot), self.end_of_scan and self.end_of_det_stream]}')  ### DEBUG
                         self.relay_socket.send_json([int(frames_accessible_tot), self.end_of_scan and self.end_of_det_stream])
                         self.nr_of_check_replies += 1
                     elif request[0] == 'load':
                         print('load')
                         self.frame_nr = request[1]['frame']
                         # Get the correct indices corresponding to the requested frame_nr
-                        print('Debug 1')
+                        logging.debug('Debug 1')
                         sendmsg = [self.all_msg.pop(key) for key in self.frame_nr]
                         # !###sendimg = np.array([self.crop(self.all_img.get(key)) for key in self.frame_nr]) #!# CHANGE get TO POP!
-                        print('Debug 2')
+                        logging.debug('Debug 2')
                         sendimg = np.array([self.all_img.pop(key) for key in self.frame_nr])  # !# CHANGE get TO POP! BUT ADD DEBUG/TEST OPTION WHICH DOES USE GET!!
-                        print('Debug 3')
+                        logging.debug('Debug 3')
                         if self.do_crop:
                             sendimg, self.newcenter, self.padmask = self.crop(sendimg)
-                            print('Debug 4')
+                            logging.debug('Debug 4')
                             if self.load_replies == 0:
-                                print('Debug 5')
+                                logging.debug('Debug 5')
                                 sendmsg[0]['new_center'] = np.array(self.newcenter)
-                                print('Debug 6')
+                                logging.debug('Debug 6')
                                 if self.do_masking:
-                                    print('Debug 7')
+                                    logging.debug('Debug 7')
                                     self.mask, newcenter, padmask = self.crop(self.mask)
-                                    print('Debug 8')
+                                    logging.debug('Debug 8')
 
                         if self.do_rebin:
                             try:
@@ -231,29 +219,26 @@ class RelayServer(object):
                                 print('Warning: could not rebin, leaving this task to PtyPy instead.')
                                 sendmsg[0]['RS_rebinned'] = False
 
-                        print('DEBUG 1')
+                        logging.debug('DEBUG 1')
                         self.sendimg.append(sendimg)  # !# DEBUG, remove line later
-                        print('DEBUG 2')
+                        logging.debug('DEBUG 2')
                         sendmsg[0]['dtype'] = sendimg[0].dtype  # Used for decompressing image in LS
-                        print('DEBUG 3')
+                        logging.debug('DEBUG 3')
                         sendmsg[0]['shape'] = sendimg.shape  # Used for decompressing image in LS
-                        print('DEBUG 4')
+                        logging.debug('DEBUG 4')
                         self.relay_socket.send_pyobj(sendmsg, flags=zmq.SNDMORE)
-                        print(f'DEBUG 5, sendimg.shape: {sendimg.shape}, sendimg.dtype: {sendimg.dtype}, sendimg[0].dtype: {sendimg[0].dtype}')
+                        logging.debug(f'DEBUG 5, sendimg.shape: {sendimg.shape}, sendimg.dtype: {sendimg.dtype}, sendimg[0].dtype: {sendimg[0].dtype}')
                         self.relay_socket.send(compress_lz4(sendimg), copy=True)
-                        print('DEBUG 6')
+                        logging.debug('DEBUG 6')
                         self.load_replies += 1
                     elif request[0] == 'stop':
-                        ##ToDo change this method so it closes the socket if RS has sent everything instead of waiting for a request from the LS side!
                         self.relay_socket.send_json(['closing connection to relay_socket'])
                         self.stop_outstream()
                     t1 = time.perf_counter()  ### DEBUG
                     t11 = time.time()  ### DEBUG
                     self.reltottime += t1 - t0  ### DEBUG
                     self.reltottimewall += t11 - t00  ### DEBUG
-                    print(('Time spent in if-relay = %f, accumulated time = %f, accululated walltime = %f' % ((t1 - t0), self.reltottime, self.reltottimewall)))  ### DEBUG
-
-                # print('Received %d positions and %d images\r' % (self.latest_pos_index_received+1, self.latest_det_index_received+1), end='', flush=True)
+                    logging.debug(('Time spent in if-relay = %f, accumulated time = %f, accululated walltime = %f' % ((t1 - t0), self.reltottime, self.reltottimewall)))  ### DEBUG
 
                 if self.end_of_scan and self.end_of_det_stream:  # and not (self.det_socket.closed and self.pos_socket.closed):
                     self.stop()
@@ -279,14 +264,12 @@ class RelayServer(object):
 
         if not self.motors_started and not self.detector_started:
             if 'filename' in info.keys() and info['filename'] != '':
-                print('This should be the initial message of a scan')  ### DEBUG
+                logging.debug('This should be the initial message of a scan')  ### DEBUG
                 print('********************* DETECTOR STARTING')
                 self.detector_started = True
             else:
-                print('Image or message from Live-mode or already started scan')  ### DEBUG
+                logging.debug('Image or message from Live-mode or already started scan')  ### DEBUG
         else:
-            # if info['htype'] == 'header':
-            #     print('********************* DETECTOR STARTING')
             if info['htype'] == 'image':
                 print(f'parts[1].buffer.nbytes = {parts[1].buffer.nbytes}')
                 ##################################
@@ -349,12 +332,6 @@ class RelayServer(object):
                     print('Will divide position message!')
                     self.all_msg = self.divide_burst_msg(msg)
                     self.latest_pos_index_received = len(self.all_msg)-1
-                    # msgs = self.divide_burst_msg(msg)
-                    # # %#self.all_msg.append(msg)
-                    # # %#self.all_msg.append(msg)
-                    # for k in range(self.j, self.j + len(msgs)):
-                    #     self.all_msg[k] = msg  # %#
-                    # self.j = len(self.all_msg)
             elif msg['status'] == 'finished':
                 self.end_of_scan = True
                 print("\tmsg['status'] = motors finished")
@@ -563,7 +540,7 @@ class RelayServer(object):
 
 def launch(RS=None):
     if RS is None:
-        RS = RelayServer()
+        RS = RelayServer(verbosity=logging.INFO) # choices: logging.INFO or logging.DEBUG
     # info about which hosts and ports to use are in gitlab>streaming-receiver>detector-config.json
     #     https://gitlab.maxiv.lu.se/scisw/detectors/streaming-receiver-cpp
     known_sources = {'Simulator':       {'det_adr': 'tcp://0.0.0.0:56789', 'pos_adr': 'tcp://127.0.0.1:5556'},
@@ -579,13 +556,9 @@ def launch(RS=None):
     src = known_sources['Simulator']
     relay_adr = 'tcp://127.0.0.1:45678'
 
-    # RS = RelayServer(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True)
-    ## RS = RelayServer()
     RS.connect(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True)
     RS.run()
 
-    # pubout = RS.runpub.communicate()[0].decode().split('\n')
-    # pushout = RS.runpush.communicate()[0].decode().split('\n')
     return known_sources, src, relay_adr, RS
 
 
