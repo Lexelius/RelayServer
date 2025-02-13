@@ -47,11 +47,13 @@ class RelayServer(object):
         self.load_replies = 0
         self.init_params = {}
         self.do_crop = None
+        self.do_rebin = None
         self.do_pos_aver = None
         self.do_divide_msgs = False
         self.center = None
         self.newcenter = None
-        self.sendimg = []
+        self.sendimg = []  ### DEBUG
+        self.sendmsg = []  ### DEBUG
         self.auto_rerun = False  # Start listening for new data again after the scan finishes
         self.motors_started = False
         self.detector_started = False
@@ -79,14 +81,14 @@ class RelayServer(object):
         print(f'Starting Relay server, reading from detector address {detector_address} and positions address {motors_address}')
         self.simulate = simulate
         context = zmq.Context()
-        self.det_socket = context.socket(zmq.PULL)
-        self.det_socket.connect(detector_address)  ## ('tcp://b-daq-node-2:20001')
+        self.det_socket = context.socket(zmq.PULL)  # data sender
+        self.det_socket.connect(detector_address)
 
-        self.pos_socket = context.socket(zmq.SUB)
-        self.pos_socket.connect(motors_address)  ## ("tcp://172.16.125.30:5556")# ("tcp://b-nanomax-controlroom-cc-3:5556")
-        self.pos_socket.setsockopt(zmq.SUBSCRIBE, b"")  # subscribe to all topics
+        self.pos_socket = context.socket(zmq.SUB)  # data sender
+        self.pos_socket.connect(motors_address)
+        self.pos_socket.setsockopt(zmq.SUBSCRIBE, b"")
 
-        self.relay_socket = context.socket(zmq.REP)
+        self.relay_socket = context.socket(zmq.REP)  # client, data consumer
         self.relay_socket.bind(relay_address)
 
         # Start simulating an ongoing experiment
@@ -157,6 +159,13 @@ class RelayServer(object):
                         self.do_rebin = 'rebin' in self.init_params.keys()
                         self.do_pos_aver = 'average_x_at_RS' in self.init_params.keys()
                         self.do_masking = 'maskfile' in self.init_params.keys()
+                        logging.debug(f'got preprocess request: {self.init_params}')
+                        if self.latest_det_index_received >= 0:
+                            logging.debug('preprocess: We got images before we know if and what to preprocess')
+                            logging.debug(f'preprocess: latest_det_index_received = {self.latest_det_index_received}')
+                            self.all_img_ = self.preprocess(np.array([self.all_img.get(key) for key in self.all_img.keys()]))
+                            for k in range(0,self.latest_det_index_received+1):
+                                self.all_img[k] = self.all_img_[k,:,:]
                         if self.do_masking:
                             maskfile = self.init_params['maskfile']
                             with h5py.File(maskfile, 'r') as f:
@@ -183,23 +192,15 @@ class RelayServer(object):
                         print('load')
                         self.frame_nr = request[1]['frame']
                         # Get the correct indices corresponding to the requested frame_nr
-                        logging.debug('Debug 1')
                         sendmsg = [self.all_msg.pop(key) for key in self.frame_nr]
                         # !###sendimg = np.array([self.crop(self.all_img.get(key)) for key in self.frame_nr]) #!# CHANGE get TO POP!
-                        logging.debug('Debug 2')
                         sendimg = np.array([self.all_img.pop(key) for key in self.frame_nr])  # !# CHANGE get TO POP! BUT ADD DEBUG/TEST OPTION WHICH DOES USE GET!!
-                        logging.debug('Debug 3')
                         if self.do_crop:
-                            sendimg, self.newcenter, self.padmask = self.crop(sendimg)
-                            logging.debug('Debug 4')
+                            ###preproc###sendimg, self.newcenter, self.padmask = self.crop(sendimg)
                             if self.load_replies == 0:
-                                logging.debug('Debug 5')
                                 sendmsg[0]['new_center'] = np.array(self.newcenter)
-                                logging.debug('Debug 6')
-                                if self.do_masking:
-                                    logging.debug('Debug 7')
-                                    self.mask, newcenter, padmask = self.crop(self.mask)
-                                    logging.debug('Debug 8')
+                                ###preproc###if self.do_masking:
+                                    ###preproc###self.mask, newcenter, padmask = self.crop(self.mask)
 
                         if self.do_rebin:
                             try:
@@ -219,17 +220,13 @@ class RelayServer(object):
                                 print('Warning: could not rebin, leaving this task to PtyPy instead.')
                                 sendmsg[0]['RS_rebinned'] = False
 
-                        logging.debug('DEBUG 1')
                         self.sendimg.append(sendimg)  # !# DEBUG, remove line later
-                        logging.debug('DEBUG 2')
+                        self.sendmsg.append(sendmsg)  # !# DEBUG, remove line later
                         sendmsg[0]['dtype'] = sendimg[0].dtype  # Used for decompressing image in LS
-                        logging.debug('DEBUG 3')
                         sendmsg[0]['shape'] = sendimg.shape  # Used for decompressing image in LS
-                        logging.debug('DEBUG 4')
                         self.relay_socket.send_pyobj(sendmsg, flags=zmq.SNDMORE)
-                        logging.debug(f'DEBUG 5, sendimg.shape: {sendimg.shape}, sendimg.dtype: {sendimg.dtype}, sendimg[0].dtype: {sendimg[0].dtype}')
+                        logging.debug(f'DEBUG, sendimg.shape: {sendimg.shape}, sendimg.dtype: {sendimg.dtype}, sendimg[0].dtype: {sendimg[0].dtype}')
                         self.relay_socket.send(compress_lz4(sendimg), copy=True)
-                        logging.debug('DEBUG 6')
                         self.load_replies += 1
                     elif request[0] == 'stop':
                         self.relay_socket.send_json(['closing connection to relay_socket'])
@@ -296,11 +293,63 @@ class RelayServer(object):
 
                         # %#self.all_img.append(img)
                 self.latest_det_index_received += 1
+
+                ######################################################################################################
+                # preprocess data and check whether the preprocess request from relay_socket have been received
+                if self.do_rebin is None or self.do_crop is None:
+                    logging.debug('We got images before we know if and what to preprocess')
+                if self.do_crop or self.do_rebin:
+                    if self.latest_det_index_received == 0:
+                        logging.debug('We know the preprocess info from the start')
+                    img = self.preprocess(img)
+
+                # we got images before we know if and what to preprocess
+                # we got images before we know if and what to preprocess: no preprocess needed
+                # we got images before we know if and what to preprocess: we will do preprocessing
+
+                # we know what to preprocess before we got images
+                # we know that no preprocess is needed before we got images
+
+                if self.latest_det_index_received == 0 and bool(self.init_params): # determine if images or preprocess info came first
+                    logging.debug('This is the first image and we know what to preprocess')
+
+                ######################################################################################################
+
                 self.all_img[self.latest_det_index_received] = img  ##[info['frame']] = img ##
                 self.recieved_image_indices.append(info['frame'])
             elif info['htype'] == 'series_end':
                 self.end_of_det_stream = True
                 print('End of detector stream')
+
+
+    def preprocess(self, prepimg):
+        #prepimg = np.array([self.all_img.get(key) for key in self.all_img.keys()])
+        prepmsg = self.all_msg
+        if self.do_crop:
+            prepimg, self.newcenter, self.padmask = self.crop(prepimg)
+            if self.load_replies == 0:
+                ###preproc###prepmsg[0]['new_center'] = np.array(self.newcenter)
+                if self.do_masking:
+                    self.mask, newcenter, padmask = self.crop(self.mask)
+
+        if self.do_rebin:
+            try:
+                weight = np.ones_like(prepimg)
+                weight[np.where(prepimg == 2 ** 32 - 1)] = 0
+                weight = u.rebin_2d(weight, self.init_params['rebin'])
+                prepimg = u.rebin_2d(prepimg, self.init_params['rebin'])
+                if self.load_replies == 0 and self.do_masking:
+                    self.mask = u.rebin_2d(self.mask, self.init_params['rebin'])
+                    prepimg = np.array([prepimg, weight, self.mask])
+                else:
+                    prepimg = np.array([prepimg, weight])
+                prepmsg[0]['RS_rebinned'] = True
+                if self.newcenter is not None:
+                    prepmsg[0]['new_center'] = np.array(self.newcenter) / float(self.init_params['rebin'])
+            except:
+                print('Warning: could not rebin, leaving this task to PtyPy instead.')
+                prepmsg[0]['RS_rebinned'] = False
+        return prepimg
 
     def pos_action(self):
         print(f'\t**** CONTRAST: {time.strftime("%H:%M:%S", time.localtime())}, {time.time() - self.t0} seconds')
@@ -540,7 +589,7 @@ class RelayServer(object):
 
 def launch(RS=None):
     if RS is None:
-        RS = RelayServer(verbosity=logging.INFO) # choices: logging.INFO or logging.DEBUG
+        RS = RelayServer(verbosity=logging.DEBUG) # choices: logging.INFO or logging.DEBUG
     # info about which hosts and ports to use are in gitlab>streaming-receiver>detector-config.json
     #     https://gitlab.maxiv.lu.se/scisw/detectors/streaming-receiver-cpp
     known_sources = {'Simulator':       {'det_adr': 'tcp://0.0.0.0:56789', 'pos_adr': 'tcp://127.0.0.1:5556'},
@@ -554,10 +603,10 @@ def launch(RS=None):
                      # need to login to blue network - SOFTIMAX to connect to det and pos
                      'SoftiMAX_andor':  {'det_adr': 'tcp://p-fanout-softimax-xzyla-andor3:10000', 'pos_adr': 'tcp://172.16.205.5:5556'}  # det_adr: tcp://b-softimax-cams-0:20007, pos_adr: b-softimax-cc-0
                      }
-    src = known_sources['NanoMAX_eiger4M']
+    src = known_sources['Simulator']
     relay_adr = 'tcp://127.0.0.1:45678'
 
-    RS.connect(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=False)
+    RS.connect(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True)
     RS.run()
 
     return known_sources, src, relay_adr, RS
