@@ -38,6 +38,7 @@ class RelayServer(object):
 
         self.all_img = {}
         self.all_msg = {}
+        self.all_weights = {}
         self.Energy = None
         self.recieved_image_indices = []  # List of received frame indices, read from detector messages
         self.recieved_pos_indices = []
@@ -160,16 +161,21 @@ class RelayServer(object):
                         self.do_pos_aver = 'average_x_at_RS' in self.init_params.keys()
                         self.do_masking = 'maskfile' in self.init_params.keys()
                         logging.debug(f'got preprocess request: {self.init_params}')
+                        if self.do_masking:
+                            # This only has to be done once, so we can just do it here.
+                            maskfile = self.init_params['maskfile']
+                            with h5py.File(maskfile, 'r') as f:
+                                self.mask = f['mask'][:]
+                            if self.do_crop:
+                                self.mask, newcenter, padmask = self.crop(self.mask)
+                            if self.do_rebin:
+                                self.mask = u.rebin_2d(self.mask, self.init_params['rebin'])
                         if self.latest_det_index_received >= 0:
                             logging.debug('preprocess: We got images before we know if and what to preprocess')
                             logging.debug(f'preprocess: latest_det_index_received = {self.latest_det_index_received}')
                             self.all_img_ = self.preprocess(np.array([self.all_img.get(key) for key in self.all_img.keys()]))
-                            for k in range(0,self.latest_det_index_received+1):
+                            for k in range(0, self.latest_det_index_received+1):
                                 self.all_img[k] = self.all_img_[k,:,:]
-                        if self.do_masking:
-                            maskfile = self.init_params['maskfile']
-                            with h5py.File(maskfile, 'r') as f:
-                                self.mask = f['mask'][:]
 
 
                     if request[0] == 'check_energy':
@@ -203,22 +209,28 @@ class RelayServer(object):
                                     ###preproc###self.mask, newcenter, padmask = self.crop(self.mask)
 
                         if self.do_rebin:
-                            try:
-                                weight = np.ones_like(sendimg)
-                                weight[np.where(sendimg == 2 ** 32 - 1)] = 0
-                                weight = u.rebin_2d(weight, self.init_params['rebin'])
-                                sendimg = u.rebin_2d(sendimg, self.init_params['rebin'])
-                                if self.load_replies == 0 and self.do_masking:
-                                    self.mask = u.rebin_2d(self.mask, self.init_params['rebin'])
-                                    sendimg = np.array([sendimg, weight, self.mask])
-                                else:
-                                    sendimg = np.array([sendimg, weight])
-                                sendmsg[0]['RS_rebinned'] = True
-                                if self.newcenter is not None:
-                                    sendmsg[0]['new_center'] = np.array(self.newcenter) / float(self.init_params['rebin'])
-                            except:
-                                print('Warning: could not rebin, leaving this task to PtyPy instead.')
-                                sendmsg[0]['RS_rebinned'] = False
+                            logging.debug(f'self.all_weights.keys = {self.all_weights.keys()}')
+                            for key in self.all_weights.keys():
+                                logging.debug(f'self.all_weights[{key}].shape = {self.all_weights[key].shape}')
+                            sendweight = np.array([self.all_weights.pop(key) for key in self.frame_nr])
+                            logging.debug(f'sendweight.shape = {sendweight.shape}')
+                        ###preproc###try:
+                            ###preproc###weight = np.ones_like(sendimg)
+                            ###preproc###weight[np.where(sendimg == 2 ** 32 - 1)] = 0
+                            ###preproc###weight = u.rebin_2d(weight, self.init_params['rebin'])
+                            ###preproc###sendimg = u.rebin_2d(sendimg, self.init_params['rebin'])
+                            if self.load_replies == 0 and self.do_masking:
+                                ###preproc###self.mask = u.rebin_2d(self.mask, self.init_params['rebin'])
+                                sendimg = np.array([sendimg, sendweight, self.mask])
+                            else:
+                                sendimg = np.array([sendimg, sendweight])
+                            ###preproc###sendmsg[0]['RS_rebinned'] = True
+                            if self.newcenter is not None:
+                                sendmsg[0]['new_center'] = np.array(self.newcenter) / float(self.init_params['rebin'])
+                                ###preproc###except:
+                            ###preproc###print('Warning: could not rebin, leaving this task to PtyPy instead.')
+                            ###preproc###sendmsg[0]['RS_rebinned'] = False
+                            sendmsg[0]['RS_rebinned'] = self.RS_rebinned
 
                         self.sendimg.append(sendimg)  # !# DEBUG, remove line later
                         self.sendmsg.append(sendmsg)  # !# DEBUG, remove line later
@@ -296,11 +308,8 @@ class RelayServer(object):
 
                 ######################################################################################################
                 # preprocess data and check whether the preprocess request from relay_socket have been received
-                if self.do_rebin is None or self.do_crop is None:
-                    logging.debug('We got images before we know if and what to preprocess')
+
                 if self.do_crop or self.do_rebin:
-                    if self.latest_det_index_received == 0:
-                        logging.debug('We know the preprocess info from the start')
                     img = self.preprocess(img)
 
                 # we got images before we know if and what to preprocess
@@ -310,8 +319,6 @@ class RelayServer(object):
                 # we know what to preprocess before we got images
                 # we know that no preprocess is needed before we got images
 
-                if self.latest_det_index_received == 0 and bool(self.init_params): # determine if images or preprocess info came first
-                    logging.debug('This is the first image and we know what to preprocess')
 
                 ######################################################################################################
 
@@ -322,33 +329,47 @@ class RelayServer(object):
                 print('End of detector stream')
 
 
-    def preprocess(self, prepimg):
+    def preprocess(self, prepimg, keys=None):
+        """
+        The cropping is performed before the rebinning, just like in ptypy.
+        The mask is cropped and rebinned when the preprocess request comes in.
+
+        :param prepimg: ndarray of image to preprocess.
+        :param keys: list of frame keys that weights should be stored in.
+            Only used when rebinning should be made and frames were recieved before
+            we got the preprocess request.
+        :return: prepimg
+        """
+
+
         #prepimg = np.array([self.all_img.get(key) for key in self.all_img.keys()])
         prepmsg = self.all_msg
         if self.do_crop:
             prepimg, self.newcenter, self.padmask = self.crop(prepimg)
-            if self.load_replies == 0:
+            ###preproc###if self.load_replies == 0:
                 ###preproc###prepmsg[0]['new_center'] = np.array(self.newcenter)
-                if self.do_masking:
-                    self.mask, newcenter, padmask = self.crop(self.mask)
+                ###preproc###if self.do_masking:
+                    ###preproc###self.mask, newcenter, padmask = self.crop(self.mask)
 
         if self.do_rebin:
+            # (mask)
             try:
-                weight = np.ones_like(prepimg)
-                weight[np.where(prepimg == 2 ** 32 - 1)] = 0
-                weight = u.rebin_2d(weight, self.init_params['rebin'])
+                self.weight = np.ones_like(prepimg)
+                self.weight[np.where(prepimg == 2 ** 32 - 1)] = 0
+                self.weight = u.rebin_2d(self.weight, self.init_params['rebin'])
+                self.all_weights[self.latest_det_index_received] = self.weight #preproc: find another solution, doesn't work when frames come before preproc rquest!
                 prepimg = u.rebin_2d(prepimg, self.init_params['rebin'])
-                if self.load_replies == 0 and self.do_masking:
-                    self.mask = u.rebin_2d(self.mask, self.init_params['rebin'])
-                    prepimg = np.array([prepimg, weight, self.mask])
-                else:
-                    prepimg = np.array([prepimg, weight])
-                prepmsg[0]['RS_rebinned'] = True
+                ###preproc###if self.load_replies == 0 and self.do_masking:
+                    ###preproc###self.mask = u.rebin_2d(self.mask, self.init_params['rebin'])
+                    ###preproc###prepimg = np.array([prepimg, self.weight, self.mask])
+                ###preproc###else:
+                    ###preproc###prepimg = np.array([prepimg, self.weight])
+                self.RS_rebinned = True
                 if self.newcenter is not None:
                     prepmsg[0]['new_center'] = np.array(self.newcenter) / float(self.init_params['rebin'])
             except:
                 print('Warning: could not rebin, leaving this task to PtyPy instead.')
-                prepmsg[0]['RS_rebinned'] = False
+                self.RS_rebinned = False
         return prepimg
 
     def pos_action(self):
