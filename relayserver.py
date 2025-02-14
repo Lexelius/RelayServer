@@ -176,6 +176,9 @@ class RelayServer(object):
                             self.all_img_ = self.preprocess(np.array([self.all_img.get(key) for key in self.all_img.keys()]))
                             for k in range(0, self.latest_det_index_received+1):
                                 self.all_img[k] = self.all_img_[k,:,:]
+                                if self.do_rebin:
+                                    self.all_weights[k] = np.array([self.weight[k, :, :]])
+
 
 
                     if request[0] == 'check_energy':
@@ -214,22 +217,13 @@ class RelayServer(object):
                                 logging.debug(f'self.all_weights[{key}].shape = {self.all_weights[key].shape}')
                             sendweight = np.array([self.all_weights.pop(key) for key in self.frame_nr])
                             logging.debug(f'sendweight.shape = {sendweight.shape}')
-                        ###preproc###try:
-                            ###preproc###weight = np.ones_like(sendimg)
-                            ###preproc###weight[np.where(sendimg == 2 ** 32 - 1)] = 0
-                            ###preproc###weight = u.rebin_2d(weight, self.init_params['rebin'])
-                            ###preproc###sendimg = u.rebin_2d(sendimg, self.init_params['rebin'])
                             if self.load_replies == 0 and self.do_masking:
                                 ###preproc###self.mask = u.rebin_2d(self.mask, self.init_params['rebin'])
                                 sendimg = np.array([sendimg, sendweight, self.mask])
                             else:
                                 sendimg = np.array([sendimg, sendweight])
-                            ###preproc###sendmsg[0]['RS_rebinned'] = True
                             if self.newcenter is not None:
                                 sendmsg[0]['new_center'] = np.array(self.newcenter) / float(self.init_params['rebin'])
-                                ###preproc###except:
-                            ###preproc###print('Warning: could not rebin, leaving this task to PtyPy instead.')
-                            ###preproc###sendmsg[0]['RS_rebinned'] = False
                             sendmsg[0]['RS_rebinned'] = self.RS_rebinned
 
                         self.sendimg.append(sendimg)  # !# DEBUG, remove line later
@@ -342,14 +336,9 @@ class RelayServer(object):
         """
 
 
-        #prepimg = np.array([self.all_img.get(key) for key in self.all_img.keys()])
         prepmsg = self.all_msg
         if self.do_crop:
             prepimg, self.newcenter, self.padmask = self.crop(prepimg)
-            ###preproc###if self.load_replies == 0:
-                ###preproc###prepmsg[0]['new_center'] = np.array(self.newcenter)
-                ###preproc###if self.do_masking:
-                    ###preproc###self.mask, newcenter, padmask = self.crop(self.mask)
 
         if self.do_rebin:
             # (mask)
@@ -359,14 +348,7 @@ class RelayServer(object):
                 self.weight = u.rebin_2d(self.weight, self.init_params['rebin'])
                 self.all_weights[self.latest_det_index_received] = self.weight #preproc: find another solution, doesn't work when frames come before preproc rquest!
                 prepimg = u.rebin_2d(prepimg, self.init_params['rebin'])
-                ###preproc###if self.load_replies == 0 and self.do_masking:
-                    ###preproc###self.mask = u.rebin_2d(self.mask, self.init_params['rebin'])
-                    ###preproc###prepimg = np.array([prepimg, self.weight, self.mask])
-                ###preproc###else:
-                    ###preproc###prepimg = np.array([prepimg, self.weight])
                 self.RS_rebinned = True
-                if self.newcenter is not None:
-                    prepmsg[0]['new_center'] = np.array(self.newcenter) / float(self.init_params['rebin'])
             except:
                 print('Warning: could not rebin, leaving this task to PtyPy instead.')
                 self.RS_rebinned = False
@@ -491,7 +473,8 @@ class RelayServer(object):
             if 'center' in self.init_params.keys() and isinstance(self.init_params['center'], (list, tuple)):
                 c_d = np.array(self.init_params['center'])  ## cy, cx : row, col  ### [751, 343]
             else:
-                c_d = np.rint(self.find_center('all', 'auto')).astype(int)
+                c_d = np.rint(self.find_center(diff, 'auto')).astype(int)  # will only calculate based on first frame.
+                logging.debug(f'Found center at {c_d}')
             self.center = c_d
         else:
             c_d = self.center
@@ -548,7 +531,8 @@ class RelayServer(object):
         """
         if isinstance(diff, str):
             diff = self.all_img
-        diff = np.array([diff[key] for key in diff.keys()])
+        if isinstance(diff, dict):
+            diff = np.array([diff[key] for key in diff.keys()])
         axes = tuple(range(1, diff.ndim + 1))
 
         if mask == 'auto':
