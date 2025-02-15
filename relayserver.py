@@ -175,9 +175,11 @@ class RelayServer(object):
                             logging.debug(f'preprocess: latest_det_index_received = {self.latest_det_index_received}')
                             self.all_img_ = self.preprocess(np.array([self.all_img.get(key) for key in self.all_img.keys()]))
                             for k in range(0, self.latest_det_index_received+1):
-                                self.all_img[k] = self.all_img_[k,:,:]
+                                self.all_img[k] = np.array(self.all_img_[k,:,:])
                                 if self.do_rebin:
-                                    self.all_weights[k] = np.array([self.weight[k, :, :]])
+                                    logging.debug(f'self.weight.shape = {self.weight.shape}')  ### DEBUG
+                                    self.all_weights[k] = np.array(self.weight[k, :, :])
+                                    logging.debug(f'self.all_weights[k] = {self.all_weights[k]}')  ### DEBUG
 
 
 
@@ -203,6 +205,8 @@ class RelayServer(object):
                         # Get the correct indices corresponding to the requested frame_nr
                         sendmsg = [self.all_msg.pop(key) for key in self.frame_nr]
                         # !###sendimg = np.array([self.crop(self.all_img.get(key)) for key in self.frame_nr]) #!# CHANGE get TO POP!
+                        for key in self.all_img.keys():  ### DEBUG
+                            logging.debug(f'self.all_img[{key}].shape = {self.all_img[key].shape}')### DEBUG
                         sendimg = np.array([self.all_img.pop(key) for key in self.frame_nr])  # !# CHANGE get TO POP! BUT ADD DEBUG/TEST OPTION WHICH DOES USE GET!!
                         if self.do_crop:
                             ###preproc###sendimg, self.newcenter, self.padmask = self.crop(sendimg)
@@ -346,8 +350,9 @@ class RelayServer(object):
                 self.weight = np.ones_like(prepimg)
                 self.weight[np.where(prepimg == 2 ** 32 - 1)] = 0
                 self.weight = u.rebin_2d(self.weight, self.init_params['rebin'])
-                self.all_weights[self.latest_det_index_received] = self.weight #preproc: find another solution, doesn't work when frames come before preproc rquest!
-                prepimg = u.rebin_2d(prepimg, self.init_params['rebin'])
+                self.all_weights[self.latest_det_index_received] = self.weight[0] # the rebinning function adds an extra dimension to the array
+                prepimg = u.rebin_2d(prepimg, self.init_params['rebin'])[0]
+                logging.debug(f'weight.shape = {self.weight.shape}, prepimg.shape = {prepimg.shape}')  ### DEBUG
                 self.RS_rebinned = True
             except:
                 print('Warning: could not rebin, leaving this task to PtyPy instead.')
