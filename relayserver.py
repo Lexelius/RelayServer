@@ -106,7 +106,7 @@ class RelayServer(object):
                                             stderr=subprocess.STDOUT)
 
         #self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] in ['tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se', 'tcp://p-nanomax-eiger-4m-daq.maxiv.lu.se']  # 'tcp://p-daq-cn-2'  ##'tcp://b-daq-node-2' ## used to determine how to decompress images
-        self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] in ['tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se', 'tcp://172.18.10.177']
+        self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] in ['tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se', 'tcp://172.18.10.177', 'tcp://172.18.10.178']
     def run(self):
         # ToDO: Add some assertion/check that sockets have been connected before continuing from here.
         self.i = -1
@@ -606,8 +606,9 @@ def launch(RS=None):
                      # 'NanoMAX_eiger1M': {'det_adr': 'tcp://b-daq-node-2:20007', 'pos_adr': 'tcp://172.16.125.30:5556'},
                      #                   'NanoMAX_eiger1M': {'det_adr': 'tcp://p-daq-cn-2:20007', 'pos_adr': 'tcp://172.16.125.30:5556'},
                      #'NanoMAX_eiger4M': {'det_adr': 'tcp://b-daq-node-2:20001', 'pos_adr': 'tcp://172.16.125.30:5556'},
-                     'NanoMAX_eiger1M': {'det_adr': 'tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se:5556', 'pos_adr': 'tcp://172.16.125.30:5556'},
+                     #'NanoMAX_eiger1M': {'det_adr': 'tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se:5556', 'pos_adr': 'tcp://172.16.125.30:5556'},
                      #'NanoMAX_eiger4M': {'det_adr': 'tcp://p-nanomax-eiger-4m-daq.maxiv.lu.se:5556', 'pos_adr': 'tcp://172.16.126.61:5556'},
+                     'NanoMAX_eiger1M': {'det_adr': 'tcp://172.18.10.178:5556', 'pos_adr': 'tcp://172.16.126.61:5556'},
                      'NanoMAX_eiger4M': {'det_adr': 'tcp://172.18.10.177:5556', 'pos_adr': 'tcp://172.16.126.61:5556'},  # updated 10 Feb 2025
                      ## pos_adr for NanoMAX can also be: 'tcp://b-nanomax-controlroom-cc-3:5556'
                      # need to login to blue network - SOFTIMAX to connect to det and pos
@@ -624,8 +625,9 @@ def launch(RS=None):
 
 if __name__ == "__main__":
     known_sources, src, relay_adr, RS = launch()
-    RS.poslogfile.close()
-    RS.detlogfile.close()
+    if RS.simulate:
+        RS.poslogfile.close()
+        RS.detlogfile.close()
     # pubout = RS.runpub.communicate()[0].decode().split('\n')
     # pushout = RS.runpush.communicate()[0].decode().split('\n')
     # print(pushout[:10])
