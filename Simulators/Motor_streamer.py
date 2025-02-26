@@ -3,6 +3,7 @@ ToDo:
 * Make it work for multiple detectors.
 *
 """
+import sys
 import zmq
 import numpy as np
 from collections import OrderedDict
@@ -11,6 +12,7 @@ import re
 from ptypy import io
 import time
 from ptypy import utils as u   ###DEBUG
+import json
 logger = u.verbose.logger   ###DEBUG
 # %%
 """
@@ -60,14 +62,26 @@ scans = {0: {'scan_file': '/data/visitors/nanomax/20220196/2022040308/raw/mar29_
          30: {'scan_file': '/data/staff/nanomax/reblex/data-simulated-recons/NTT_scan_001190/simulated_data/sim_files_256px_08/scan_001190_eiger4m.hdf5', 'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'},  # 2912 frames, simulated data from recon of sample nr 12, original positions, correct orientation, 256px
          31: {'scan_file': '/data/staff/nanomax/reblex/data-simulated-recons/Siemens-img/simulated_data/sim_files_simg_64px_Au-Si3N4_gauss_step10px_r40_1e+12_01/scan_000000_eiger4m.hdf5', 'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'},  # 400 frames, simulated data from constructed siemens star array and gaussian probe
          32: {'scan_file': '/data/staff/nanomax/reblex/data-simulated-recons/Siemens-img/simulated_data/sim_files_simg_256px_Au-Si3N4_step10px_1e+12_00/scan_000000_eiger4m.hdf5', 'path_to_data': '/entry/measurement/Eiger/data', 'detector':  'eiger4m'},  # 400 frames, raster, simulated data from constructed siemens star array and probe from NTT_scan_001190
-         33: {'scan_file':    '/data/staff/nanomax/reblex/data-simulated-recons/Siemens-img/simulated_data/sim_files_simg_256px_Au-Si3N4_step10px_1e+10_poisTRUE_spiral_00/scan_000000_eiger4m.hdf5', 'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'},  # 315 frames, spiral, simulated data from constructed siemens star array and probe from NTT_scan_001190
+         33: {'scan_file': '/data/staff/nanomax/reblex/data-simulated-recons/Siemens-img/simulated_data/sim_files_simg_256px_Au-Si3N4_step10px_1e+10_poisTRUE_spiral_00/scan_000000_eiger4m.hdf5', 'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'},  # 315 frames, spiral, simulated data from constructed siemens star array and probe from NTT_scan_001190
          34: {'scan_file': '/data/staff/nanomax/reblex/data-simulated-recons/Siemens-img/simulated_data/sim_files_simg_256px_Au-Si3N4_step40px_1e+10_poisTRUE_spiral_00/scan_000000_eiger4m.hdf5', 'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'},  # 315 frames, spiral, simulated data from constructed siemens star array and probe from NTT_scan_001190
          35: {'scan_file': '/data/staff/nanomax/reblex/data-simulated-recons/Siemens-img/simulated_data/sim_files_simg_256px_Au-Si3N4_step35px_1e+10_poisTRUE_spiral_00/scan_000000_eiger4m.hdf5','path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'},   # 315 frames, spiral, simulated data from constructed siemens star array and probe from NTT_scan_001190
          36: {'scan_file': '/data/staff/nanomax/reblex/data-simulated-recons/Siemens-img/simulated_data/sim_files_simg_256px_Au-Si3N4_step27px_1e+10_poisTRUE_spiral_00/scan_000000_eiger4m.hdf5','path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'},   # 315 frames, spiral, simulated data from constructed siemens star array and probe from NTT_scan_001190
          37: {'scan_file': '/data/staff/nanomax/reblex/data-simulated-recons/Siemens-img/simulated_data/sim_files_simg_256px_Au-Si3N4_step19px_1e+10_poisTRUE_spiral_00/scan_000000_eiger4m.hdf5','path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'},   # 315 frames, spiral, simulated data from constructed siemens star array and probe from NTT_scan_001190
+         38: {'scan_file': '/data/visitors/nanomax/20250057/2025021508/raw/0001_setup/scan_000012_eiger1m.hdf5', 'path_to_data': '/entry/instrument/Eiger/data', 'detector': 'eiger1m'}
          }
 sample = 37  ######## Pick your sample here! 0:27fr, 1:1000fr, 2:16fr, 3:100fr, 4:55fr, 5:55fr, 6:15fr
-sleeptime = 0.6#0.6 #for sample 29 #0.5  # Time taken between sending the motor messages
+if len(sys.argv)>=2:
+    # Sample have been chosen as an input
+    input = json.loads(sys.argv[1])
+    if isinstance(input, dict):
+        sample = 0
+        scans = {sample: input}
+        print(f'input is a dict, scans[sample] = \n{scans[sample]}\n')
+    elif isinstance(input, int):
+        sample = input
+        print(f'input is a int, scans[sample] = \n{scans[sample]}\n')
+
+sleeptime = 0#0.6#for 33-37:  0.6#0.6 #for sample 29 #0.5  # Time taken between sending the motor messages
 prepsleep = 0#7.5 for sample 29  # Make up for difference in prepping time of the detector- and motor streamer
 scan_fname = scans[sample]['scan_file']
 path, scannr = re.findall(r'/.{0,}/|\d{6}', scan_fname)  # ToDo: use os.path.split(scan_fname)
@@ -77,7 +91,7 @@ h5_data = io.h5read(h5_fname, 'entry')['entry']
 msgs = OrderedDict(reversed(list(h5_data['measurement'].items())))
 nframes = msgs[scans[sample]['detector']]['frames'].shape[0] if 'eiger' in scans[sample]['detector'] else msgs[scans[sample]['detector']].shape[0] # msgs['dt'].__len__()
 nr = np.linspace(0, nframes - 1, nframes, dtype=int)
-
+snap_key = next(iter(set(h5_data) & {'snapshot', 'snapshots'}), None)
 
 # %% Rearranging of h5_data['measurement'] into separate messages/frames
 # Assuming that all values that are not dicts are ndarrays of size equal to nr of frames.
@@ -137,9 +151,7 @@ msgs_divided = list(map(lambda i: divide_msgs(copy.deepcopy(msgs_prepped), i), n
 # %timeit msgs_divided = list(map(lambda i: divide_msgs(copy.deepcopy(msgs_prepped), i), nr))
 # 4.17 ms ± 342 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
 
-if scans[sample]['detector'] == 'eiger4m':
-    initial_msg = {'scannr': scannr, 'status': 'started', 'path': path.rstrip('/'), 'snapshots': h5_data['snapshots']['pre_scan'], 'description': h5_data['description']}
-    last_msg = {'scannr': scannr, 'status': 'finished', 'path': path.rstrip('/'), 'snapshots': h5_data['snapshots']['post_scan'], 'description': h5_data['description']}
+if snap_key == 'snapshots':
     # Store values as float and not as arrays (as it is in the streamed messages):
     snap_pre = h5_data['snapshots']['pre_scan'].copy()
     snap_post = h5_data['snapshots']['post_scan'].copy()
@@ -148,31 +160,25 @@ if scans[sample]['detector'] == 'eiger4m':
     for key, val in snap_post.items():
         snap_post[key] = val[0]
 else:
-    initial_msg = {'scannr': scannr, 'status': 'started', 'path': path.rstrip('/'), 'snapshot': h5_data['snapshot'], 'description': h5_data['description']}
-    last_msg = {'scannr': scannr, 'status': 'finished', 'path': path.rstrip('/'), 'snapshot': h5_data['snapshot'], 'description': h5_data['description']}
     # Store values as float and not as arrays (as it is in the streamed messages):
     snap = h5_data['snapshot'].copy()
     for key, val in snap.items():
         snap[key] = val[0]
 
-# Store values as float and not as arrays (as it is in the streamed messages):
-# snap = h5_data['snapshot'].copy()
-# for key, val in snap.items():
-#     snap[key] = val[0]
-
 initial_msg = {'scannr': int(scannr),
                'status': 'started',
                'path': path.rstrip('/'),
-               'snapshot': snap_pre if scans[sample]['detector'] == 'eiger4m' else snap,
+               'snapshot': snap_pre if snap_key == 'snapshots' else snap,
                'description': h5_data['description'][0].decode('utf-8')}
 
 last_msg = {'scannr': int(scannr),
             'status': 'finished',
             'path': path.rstrip('/'),
-            'snapshot': snap_post if scans[sample]['detector'] == 'eiger4m' else snap,
+            'snapshot': snap_post if snap_key == 'snapshots' else snap,
             'description': h5_data['description'][0].decode('utf-8')}
 
-# %% Start sending data
+#%%
+# Start sending data
 
 time.sleep(prepsleep)  # Make up for difference in prepping time of the detector- and motor streamer
 t1 = time.time()

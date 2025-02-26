@@ -1,3 +1,5 @@
+import json
+import sys
 import zmq
 from bitshuffle import compress_lz4
 import numpy as np
@@ -5,6 +7,8 @@ import re
 from ptypy import io
 import errno
 import time
+import json
+
 
 """
 Script used to simulate the data stream from an Eiger or Andor detector.
@@ -48,9 +52,21 @@ scans = {0: {'scan_file': '/data/visitors/nanomax/20220196/2022040308/raw/mar29_
          35: {'scan_file': '/data/staff/nanomax/reblex/data-simulated-recons/Siemens-img/simulated_data/sim_files_simg_256px_Au-Si3N4_step35px_1e+10_poisTRUE_spiral_00/scan_000000_eiger4m.hdf5','path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'},   # 315 frames, spiral, simulated data from constructed siemens star array and probe from NTT_scan_001190
          36: {'scan_file': '/data/staff/nanomax/reblex/data-simulated-recons/Siemens-img/simulated_data/sim_files_simg_256px_Au-Si3N4_step27px_1e+10_poisTRUE_spiral_00/scan_000000_eiger4m.hdf5','path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'},   # 315 frames, spiral, simulated data from constructed siemens star array and probe from NTT_scan_001190
          37: {'scan_file': '/data/staff/nanomax/reblex/data-simulated-recons/Siemens-img/simulated_data/sim_files_simg_256px_Au-Si3N4_step19px_1e+10_poisTRUE_spiral_00/scan_000000_eiger4m.hdf5','path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger4m'},   # 315 frames, spiral, simulated data from constructed siemens star array and probe from NTT_scan_001190
+         38: {'scan_file': '/data/visitors/nanomax/20250057/2025021508/raw/0001_setup/scan_000012_eiger1m.hdf5', 'path_to_data': '/entry/instrument/Eiger/data', 'detector': 'eiger1m'}
          }
 sample = 37  ######## Pick your sample here! 0:27fr, 1:1000fr, 2:16fr, 3:100fr, 4:55fr, 5:55fr, 6:15fr
-sleeptime = 0.6+0.0415#0.6 #for sample 29#0.5  # Time taken between sending the detector messages
+if len(sys.argv)>=2:
+    # Sample have been chosen as an input
+    input = json.loads(sys.argv[1])
+    if isinstance(input, dict):
+        sample = 0
+        scans = {sample: input}
+        print(f'input is a dict, scans[sample] = \n{scans[sample]}\n')
+    elif isinstance(input, int):
+        sample = input
+        print(f'input is a int, scans[sample] = \n{scans[sample]}\n')
+
+sleeptime = 0#0.64#for 33-37:  0.6+0.0415#0.6 #for sample 29#0.5  # Time taken between sending the detector messages
 prepsleep = 0.289#1.57 for sample 30#0. for sample 29 # Make up for difference in prepping time of the detector- and motor streamer
 scan_fname = scans[sample]['scan_file']
 path, scannr = re.findall(r'/.{0,}/|\d{6}', scan_fname)
@@ -88,7 +104,7 @@ except zmq.error.ZMQError as e:
 
 time.sleep(prepsleep)  # Make up for difference in prepping time of the detector- and motor streamer
 i = -1
-k = 438  ## sort of random nr, depends on how many runs have been made previously.
+k = 438  ## nr that depends on how many runs have been made previously.
 dct_first = {'filename': scan_fname, 'htype': 'header', 'msg_number': k}
 t1 = time.time()
 print(f'Prepping the detector simulator took {t1 - t0:.04f} s.')  ## 1.0029 s
@@ -101,18 +117,18 @@ while True:
         k += 1
         dct = {"compression": compr, "frame": i, "htype": "image", "msg_number": k, "shape": [imshape[0], imshape[1]], "type": str(data.dtype)}
         data_array = np.ndarray(shape=imshape, dtype=data.dtype,
-                                buffer=data[i, :, :])  ## buffer=np.linspace(i, npx-1+i, npx, dtype="uint32")) ## buffer=np.random.rand(imshape[0],imshape[1]))
+                                buffer=data[i, :, :])
 
         if compr == 'bslz4':
             ## It takes apprx 0.05s for 1 iteration (without sleeping) with this setting when
             ## data_array.shape: [2162, 2068],  and data_array.dtype: dtype('uint32')
             data_array_compressed = compress_lz4(data_array)
             det_socket.send_json(dct, flags=zmq.SNDMORE)
-            det_socket.send(data_array_compressed)  # in the meeting 1april, we said that I should have data_array.buffer as the input here but then I just get the error:  'numpy.ndarray' object has no attribute 'buffer'
+            det_socket.send(data_array_compressed)
             print(f'Sent frame nr. {i} at time {time.strftime("%H:%M:%S", time.localtime())}')
         elif compr == 'none':
             det_socket.send_json(dct, flags=zmq.SNDMORE)
-            det_socket.send(data_array)  # in the meeting 1aprildet, we said that I should have data_array.buffer as the input here but then I just get the error:  'numpy.ndarray' object has no attribute 'buffer'
+            det_socket.send(data_array)
             print(f'\nSent frame nr. {i} at time {time.strftime("%H:%M:%S", time.localtime())}')
 
 

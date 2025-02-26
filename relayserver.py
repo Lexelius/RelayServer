@@ -1,15 +1,10 @@
 import json
 from typing import List, Any
-
 import zmq
 from bitshuffle import decompress_lz4
 from bitshuffle import compress_lz4
-import select
 import time
-import bitshuffle
 import numpy as np
-import struct
-
 import subprocess
 import sys
 import os
@@ -65,7 +60,7 @@ class RelayServer(object):
         self.zmqtottime = 0  ### DEBUG
         print(self.__dict__)
 
-    def connect(self, detector_address, motors_address, relay_address, simulate):
+    def connect(self, detector_address, motors_address, relay_address, simulate, simulation_sample=None):
         """
         Initiates the connections and binding of the sockets.
         Starts simulating an ongoing experiment in new processes
@@ -77,6 +72,10 @@ class RelayServer(object):
         motors_address : str
         relay_address : str
         simulate : bool
+        simulation_sample : int, str, or None,
+            int: choose which scan file to simulate with from the dictionary in the streamers
+            str: with the format of json.dumps({'scan_file': '/.../scanname.hdf5', 'path_to_data': '/hdf5/path/to/data', 'detector': 'detector_name'})
+            None: Sample is chosen by the hardcoded
 
         """
         print(f'Starting Relay server, reading from detector address {detector_address} and positions address {motors_address}')
@@ -98,14 +97,19 @@ class RelayServer(object):
             self.poslogfile = open(self.RS_path + '/debug_logs/motor_log.txt', "w")
             self.detlogfile = open(self.RS_path + '/debug_logs/detector_log.txt', "w")
 
-            self.runpub = subprocess.Popen([sys.executable, self.RS_path + '/Simulators/Motor_streamer.py'],
+            if simulation_sample is not None:
+                arg_motor = [sys.executable, self.RS_path + '/Simulators/Motor_streamer.py', simulation_sample]
+                arg_detector = [sys.executable, self.RS_path + '/Simulators/Detector_streamer.py', simulation_sample]
+            else:
+                arg_motor = [sys.executable, self.RS_path + '/Simulators/Motor_streamer.py']
+                arg_detector = [sys.executable, self.RS_path + '/Simulators/Detector_streamer.py']
+            self.runpub = subprocess.Popen(arg_motor,
                                            stdout=self.poslogfile,
                                            stderr=subprocess.STDOUT)
-            self.runpush = subprocess.Popen([sys.executable, self.RS_path + '/Simulators/Detector_streamer.py'],
+            self.runpush = subprocess.Popen(arg_detector,
                                             stdout=self.detlogfile,
                                             stderr=subprocess.STDOUT)
 
-        #self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] in ['tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se', 'tcp://p-nanomax-eiger-4m-daq.maxiv.lu.se']  # 'tcp://p-daq-cn-2'  ##'tcp://b-daq-node-2' ## used to determine how to decompress images
         self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] in ['tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se', 'tcp://172.18.10.177', 'tcp://172.18.10.178']
     def run(self):
         # ToDO: Add some assertion/check that sockets have been connected before continuing from here.
@@ -205,8 +209,6 @@ class RelayServer(object):
                         # Get the correct indices corresponding to the requested frame_nr
                         sendmsg = [self.all_msg.pop(key) for key in self.frame_nr]
                         # !###sendimg = np.array([self.crop(self.all_img.get(key)) for key in self.frame_nr]) #!# CHANGE get TO POP!
-                        for key in self.all_img.keys():  ### DEBUG
-                            logging.debug(f'self.all_img[{key}].shape = {self.all_img[key].shape}')### DEBUG
                         sendimg = np.array([self.all_img.pop(key) for key in self.frame_nr])  # !# CHANGE get TO POP! BUT ADD DEBUG/TEST OPTION WHICH DOES USE GET!!
                         if self.do_crop:
                             ###preproc###sendimg, self.newcenter, self.padmask = self.crop(sendimg)
@@ -301,24 +303,12 @@ class RelayServer(object):
                 else:
                     print(f"Unknown compression type: {info['compression']}")
 
-                        # %#self.all_img.append(img)
+                # %#self.all_img.append(img)
                 self.latest_det_index_received += 1
 
-                ######################################################################################################
                 # preprocess data and check whether the preprocess request from relay_socket have been received
-
                 if self.do_crop or self.do_rebin:
                     img = self.preprocess(img)
-
-                # we got images before we know if and what to preprocess
-                # we got images before we know if and what to preprocess: no preprocess needed
-                # we got images before we know if and what to preprocess: we will do preprocessing
-
-                # we know what to preprocess before we got images
-                # we know that no preprocess is needed before we got images
-
-
-                ######################################################################################################
 
                 self.all_img[self.latest_det_index_received] = img  ##[info['frame']] = img ##
                 self.recieved_image_indices.append(info['frame'])
@@ -616,8 +606,14 @@ def launch(RS=None):
                      }
     src = known_sources['Simulator']
     relay_adr = 'tcp://127.0.0.1:45678'
+    if len(sys.argv) >= 2:
+        # Sample have been chosen through input
+        simsample = sys.argv[1]
+        print(f'simsample: {simsample}')
+    else:
+        simsample = None
 
-    RS.connect(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True)
+    RS.connect(detector_address=src['det_adr'], motors_address=src['pos_adr'], relay_address=relay_adr, simulate=True, simulation_sample=simsample)
     RS.run()
 
     return known_sources, src, relay_adr, RS
