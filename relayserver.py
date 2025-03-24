@@ -80,6 +80,7 @@ class RelayServer(object):
         """
         print(f'Starting Relay server, reading from detector address {detector_address} and positions address {motors_address}')
         self.simulate = simulate
+        self.sim_samp = simulation_sample
         context = zmq.Context()
         self.det_socket = context.socket(zmq.PULL)  # data sender
         self.det_socket.connect(detector_address)
@@ -91,26 +92,32 @@ class RelayServer(object):
         self.relay_socket = context.socket(zmq.REP)  # client, data consumer
         self.relay_socket.bind(relay_address)
 
-        # Start simulating an ongoing experiment
-        if simulate:
-            os.makedirs(self.RS_path + '/debug_logs', exist_ok=True)
-            self.poslogfile = open(self.RS_path + '/debug_logs/motor_log.txt', "w")
-            self.detlogfile = open(self.RS_path + '/debug_logs/detector_log.txt', "w")
-
-            if simulation_sample is not None:
-                arg_motor = [sys.executable, self.RS_path + '/Simulators/Motor_streamer.py', simulation_sample]
-                arg_detector = [sys.executable, self.RS_path + '/Simulators/Detector_streamer.py', simulation_sample]
-            else:
-                arg_motor = [sys.executable, self.RS_path + '/Simulators/Motor_streamer.py']
-                arg_detector = [sys.executable, self.RS_path + '/Simulators/Detector_streamer.py']
-            self.runpub = subprocess.Popen(arg_motor,
-                                           stdout=self.poslogfile,
-                                           stderr=subprocess.STDOUT)
-            self.runpush = subprocess.Popen(arg_detector,
-                                            stdout=self.detlogfile,
-                                            stderr=subprocess.STDOUT)
-
         self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] in ['tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se', 'tcp://172.18.10.177', 'tcp://172.18.10.178']
+
+        # if self.simulate:
+        #     self.connect_simulators(self, simulation_sample=self.sim_samp)
+
+
+    def connect_simulators(self, simulation_sample=None):
+        # Start simulating an ongoing experiment
+        os.makedirs(self.RS_path + '/debug_logs', exist_ok=True)
+        self.poslogfile = open(self.RS_path + '/debug_logs/motor_log.txt', "w")
+        self.detlogfile = open(self.RS_path + '/debug_logs/detector_log.txt', "w")
+
+        if simulation_sample is not None:
+            arg_motor = [sys.executable, self.RS_path + '/Simulators/Motor_streamer.py', simulation_sample]
+            arg_detector = [sys.executable, self.RS_path + '/Simulators/Detector_streamer.py', simulation_sample]
+        else:
+            arg_motor = [sys.executable, self.RS_path + '/Simulators/Motor_streamer.py']
+            arg_detector = [sys.executable, self.RS_path + '/Simulators/Detector_streamer.py']
+        self.runpub = subprocess.Popen(arg_motor,
+                                       stdout=self.poslogfile,
+                                       stderr=subprocess.STDOUT)
+        self.runpush = subprocess.Popen(arg_detector,
+                                        stdout=self.detlogfile,
+                                        stderr=subprocess.STDOUT)
+
+
     def run(self):
         # ToDO: Add some assertion/check that sockets have been connected before continuing from here.
         self.i = -1
@@ -158,6 +165,9 @@ class RelayServer(object):
                     ### ToDo: Change "check_energy"-request to "initialize"-request and implement params for cropping, rebinning, background subtract
                     # !#
                     if request[0] == 'preprocess':
+                        if self.simulate:
+                            # Starting the detector and motor streamers now that we got a connection with the client.
+                            self.connect_simulators(self, simulation_sample=self.sim_samp)
                         self.init_params = request[1]
                         self.relay_socket.send_json(['Preprocess message received'])
                         self.do_crop = 'shape' in self.init_params.keys()
