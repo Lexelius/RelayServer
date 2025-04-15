@@ -70,19 +70,24 @@ scans = {0: {'scan_file': '/data/visitors/nanomax/20220196/2022040308/raw/mar29_
          38: {'scan_file': '/data/visitors/nanomax/20250057/2025021508/raw/0001_setup/scan_000012_eiger1m.hdf5', 'path_to_data': '/entry/instrument/Eiger/data', 'detector': 'eiger1m'}
          }
 sample = 37  ######## Pick your sample here! 0:27fr, 1:1000fr, 2:16fr, 3:100fr, 4:55fr, 5:55fr, 6:15fr
+sleeptime = 0#0.7125#0.759#0.6#for 33-37:  0.6#0.6 #for sample 29 #0.5  # Time taken between sending the motor messages
+prepsleep = 0#7.5 for sample 29  # Make up for difference in prepping time of the detector- and motor streamer
+
 if len(sys.argv)>=2:
     # Sample have been chosen as an input
     input = json.loads(sys.argv[1])
     if isinstance(input, dict):
         sample = 0
         scans = {sample: input}
+        # check if a sleeptime was specified for delaying the time between messages being sent
+        if 'sleeptime' in list(scans[sample].keys()):
+            sleeptime = scans[sample]['sleeptime']
         print(f'input is a dict, scans[sample] = \n{scans[sample]}\n')
     elif isinstance(input, int):
         sample = input
         print(f'input is a int, scans[sample] = \n{scans[sample]}\n')
 
-sleeptime = 0#0.6#for 33-37:  0.6#0.6 #for sample 29 #0.5  # Time taken between sending the motor messages
-prepsleep = 0#7.5 for sample 29  # Make up for difference in prepping time of the detector- and motor streamer
+
 scan_fname = scans[sample]['scan_file']
 path, scannr = re.findall(r'/.{0,}/|\d{6}', scan_fname)  # ToDo: use os.path.split(scan_fname)
 h5_fname = path + scannr + '.h5'
