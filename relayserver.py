@@ -95,10 +95,10 @@ class RelayServer(object):
         self.decomp_from_byte12 = detector_address.rsplit(':', 1)[0] in ['tcp://p-nanomax-eiger-1m-daq.maxiv.lu.se', 'tcp://172.18.10.177', 'tcp://172.18.10.178']
 
         # if self.simulate:
-        #     self.connect_simulators(self, simulation_sample=self.sim_samp)
+        #     self.connect_streamers(self, simulation_sample=self.sim_samp)
 
 
-    def connect_simulators(self, simulation_sample=None):
+    def connect_streamers(self, simulation_sample):
         # Start simulating an ongoing experiment
         os.makedirs(self.RS_path + '/debug_logs', exist_ok=True)
         self.poslogfile = open(self.RS_path + '/debug_logs/motor_log.txt', "w")
@@ -167,7 +167,8 @@ class RelayServer(object):
                     if request[0] == 'preprocess':
                         if self.simulate:
                             # Starting the detector and motor streamers now that we got a connection with the client.
-                            self.connect_simulators(self, simulation_sample=self.sim_samp)
+                            logging.debug(self.sim_samp)
+                            self.connect_streamers(simulation_sample=self.sim_samp)
                         self.init_params = request[1]
                         self.relay_socket.send_json(['Preprocess message received'])
                         self.do_crop = 'shape' in self.init_params.keys()
