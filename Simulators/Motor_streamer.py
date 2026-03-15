@@ -18,7 +18,7 @@ logger = u.verbose.logger   ###DEBUG
 """
 Script used to simulate the stream containing motor related data, such as positions and energy.
 """
-t0 = time.time()
+t0 = time.perf_counter_ns()
 print('Starting Contrast/motor simulator')
 pos_host = 'tcp://127.0.0.1'  # NanoMax contrast: 'tcp://172.16.125.30'
 pos_port = '5556'  # NanoMax contrast: '5556'
@@ -70,7 +70,7 @@ scans = {0: {'scan_file': '/data/visitors/nanomax/20220196/2022040308/raw/mar29_
          38: {'scan_file': '/data/visitors/nanomax/20250057/2025021508/raw/0001_setup/scan_000012_eiger1m.hdf5', 'path_to_data': '/entry/instrument/Eiger/data', 'detector': 'eiger1m'}
          }
 sample = 37  ######## Pick your sample here! 0:27fr, 1:1000fr, 2:16fr, 3:100fr, 4:55fr, 5:55fr, 6:15fr
-sleeptime = 0#0.7125#0.759#0.6#for 33-37:  0.6#0.6 #for sample 29 #0.5  # Time taken between sending the motor messages
+sleeptime = 0.2#0.7125#0.759#0.6#for 33-37:  0.6#0.6 #for sample 29 #0.5  # Time taken between sending the motor messages
 prepsleep = 0#7.5 for sample 29  # Make up for difference in prepping time of the detector- and motor streamer
 
 if len(sys.argv)>=2:
@@ -81,7 +81,7 @@ if len(sys.argv)>=2:
         scans = {sample: input}
         # check if a sleeptime was specified for delaying the time between messages being sent
         if 'sleeptime' in list(scans[sample].keys()):
-            sleeptime = scans[sample]['sleeptime']
+            sleeptime = float(scans[sample]['sleeptime'])
         print(f'input is a dict, scans[sample] = \n{scans[sample]}\n')
     elif isinstance(input, int):
         sample = input
@@ -94,7 +94,35 @@ h5_fname = path + scannr + '.h5'
 
 h5_data = io.h5read(h5_fname, 'entry')['entry']
 msgs = OrderedDict(reversed(list(h5_data['measurement'].items())))
-nframes = msgs[scans[sample]['detector']]['frames'].shape[0] if 'eiger' in scans[sample]['detector'] else msgs[scans[sample]['detector']].shape[0] # msgs['dt'].__len__()
+
+if isinstance(msgs[scans[sample]['detector']], dict):
+    datakeys = list(msgs[scans[sample]['detector']].keys())
+    print(f'datakeys: {datakeys}')
+    if 'thumbs:' in datakeys:
+        datakeys.remove('thumbs:')
+        print(f'datakeys: {datakeys}')
+    if len(datakeys) == 1:
+        datakey = datakeys[0]
+    else:
+        print('Error: could not figure out correct key for where diffraction data is stored.')
+        raise ValueError
+        sys.exit(1)
+    nframes = msgs[scans[sample]['detector']][datakey].shape[0]
+elif isinstance(msgs[scans[sample]['detector']], np.ndarray):
+    nframes = msgs[scans[sample]['detector']].shape[0]
+
+
+
+# try:
+#     nframes = msgs[scans[sample]['detector']]['frames'].shape[0] if 'eiger' in scans[sample]['detector'] else msgs[scans[sample]['detector']].shape[0]  # msgs['dt'].__len__()
+# except:
+#     try:
+#         nframes = msgs[scans[sample]['detector']]['data'].shape[0]  # msgs['dt'].__len__()
+#     except:
+#         print('Error: could not figure out correct keys for where diffraction data is stored.')
+#         pass
+#
+# nframes = msgs[scans[sample]['detector']]['frames'].shape[0] if 'eiger' in scans[sample]['detector'] else msgs[scans[sample]['detector']].shape[0] # msgs['dt'].__len__()
 nr = np.linspace(0, nframes - 1, nframes, dtype=int)
 snap_key = next(iter(set(h5_data) & {'snapshot', 'snapshots'}), None)
 
@@ -136,7 +164,7 @@ def divide_msgs(dct, i):
 # I don't think there's a way to tell if universal should be True or False when reading the files.
 msgs_prepped = msgs.copy() ## deepcopy unneccessary her and takes alot of time! # copy.deepcopy(msgs)
 if 'eiger' in scans[sample]['detector']:
-    msgs_prepped[scans[sample]['detector']]['frames'] = {'type':      'Link',
+    msgs_prepped[scans[sample]['detector']][datakey] = {'type':      'Link',
                                                          'filename':  scan_fname,
                                                          'path':      scans[sample]['path_to_data'], #'entry/measurement/Eiger/data',
                                                          'universal': True}
@@ -186,21 +214,21 @@ last_msg = {'scannr': int(scannr),
 # Start sending data
 
 time.sleep(prepsleep)  # Make up for difference in prepping time of the detector- and motor streamer
-t1 = time.time()
-print(f'Prepping the motor simulator took {t1 - t0:.04f} s.')
+t1 = time.perf_counter_ns()
+print(f'Prepping the motor simulator took {(t1 - t0)*10**(-9):.04f} s.')
 print(f'Starting at time {time.strftime("%H:%M:%S", time.localtime())}')
 pos_socket.send_pyobj(initial_msg)
 
 i = -1
 for i in range(nframes):
-    time.sleep(0.055)
+    #time.sleep(0.055)
     if not sleeptime == 0: time.sleep(sleeptime)
     pos_socket.send_pyobj(OrderedDict(msgs_divided[i]))
     print(f'Sent frame nr. {i} at time {time.strftime("%H:%M:%S", time.localtime())}')
 
 if not sleeptime == 0: time.sleep(sleeptime)
 pos_socket.send_pyobj(last_msg)
-print(f'Finished at time {time.strftime("%H:%M:%S", time.localtime())}, sending all messages took {time.time() - t1} s.')
+print(f'Finished at time {time.strftime("%H:%M:%S", time.localtime())}, sending all messages took {(time.perf_counter_ns() - t1)*10**(-9)} s.')
 
 ###time.sleep(10)  # naive wait for tasks to drain
 pos_socket.close()
