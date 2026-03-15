@@ -13,7 +13,7 @@ import json
 """
 Script used to simulate the data stream from an Eiger or Andor detector.
 """
-t0 = time.time()
+t0 = time.perf_counter_ns()
 scans = {0: {'scan_file': '/data/visitors/nanomax/20220196/2022040308/raw/mar29_KB_align/scan_000490_eiger.hdf5',           'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger'},    # 27 frames
          1: {'scan_file': '/data/visitors/nanomax/20211244/2021120808/raw/0000_setup/scan_000036_eiger.hdf5',               'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger'},    # 1000 frames
          2: {'scan_file': '/home/reblex/Documents/Data/SavedRelayMessages/20220824/raw/sample/scan_000029_eiger1m.hdf5',    'path_to_data': '/entry/measurement/Eiger/data', 'detector': 'eiger1m'},  # 16 frames
@@ -55,7 +55,7 @@ scans = {0: {'scan_file': '/data/visitors/nanomax/20220196/2022040308/raw/mar29_
          38: {'scan_file': '/data/visitors/nanomax/20250057/2025021508/raw/0001_setup/scan_000012_eiger1m.hdf5', 'path_to_data': '/entry/instrument/Eiger/data', 'detector': 'eiger1m'}
          }
 sample = 37  ######## Pick your sample here! 0:27fr, 1:1000fr, 2:16fr, 3:100fr, 4:55fr, 5:55fr, 6:15fr
-sleeptime = 0#0.7125#0.759#0.64#for 33-37:  0.6+0.0415#0.6 #for sample 29#0.5  # Time taken between sending the detector messages
+sleeptime = 0.2#0.7125#0.759#0.64#for 33-37:  0.6+0.0415#0.6 #for sample 29#0.5  # Time taken between sending the detector messages
 prepsleep = 0.289#1.57 for sample 30#0. for sample 29 # Make up for difference in prepping time of the detector- and motor streamer
 
 if len(sys.argv)>=2:
@@ -66,7 +66,7 @@ if len(sys.argv)>=2:
         scans = {sample: input}
         # check if a sleeptime was specified for delaying the time between messages being sent
         if 'sleeptime' in list(scans[sample].keys()):
-            sleeptime = scans[sample]['sleeptime']
+            sleeptime = float(scans[sample]['sleeptime'])
         print(f'input is a dict, scans[sample] = \n{scans[sample]}\n')
     elif isinstance(input, int):
         sample = input
@@ -76,6 +76,8 @@ if len(sys.argv)>=2:
 scan_fname = scans[sample]['scan_file']
 path, scannr = re.findall(r'/.{0,}/|\d{6}', scan_fname)
 data = io.h5read(scan_fname, scans[sample]['path_to_data'])[scans[sample]['path_to_data']]
+print(f'scan file: {scan_fname}')
+print(f'data.shape = {data.shape}') # added 2025-11-26 can be deleted
 ##data=np.flip(data,0) # uncomment for flipping the order
 compr = 'bslz4' if 'eiger' in scans[sample]['detector'] else 'none'
 
@@ -111,9 +113,9 @@ time.sleep(prepsleep)  # Make up for difference in prepping time of the detector
 i = -1
 k = 438  ## nr that depends on how many runs have been made previously.
 dct_first = {'filename': scan_fname, 'htype': 'header', 'msg_number': k}
-t1 = time.time()
-print(f'Prepping the detector simulator took {t1 - t0:.04f} s.')  ## 1.0029 s
-print(f'Starting at time {time.strftime("%H:%M:%S", time.localtime())}')
+t1 = time.perf_counter_ns()
+print(f'Prepping the detector simulator took {(t1 - t0)*10**(-9):.04f} s.')  ## 1.0029 s
+print(f'data_array_compressed.shape : {compress_lz4(np.ndarray(shape=imshape, dtype=data.dtype, buffer=data[i, :, :])).shape}')# added 2025-11-26 can be deleted
 det_socket.send_json(dct_first)
 while True:
     try:
@@ -143,7 +145,7 @@ while True:
             k += 1
             dct_last = {'htype': 'series_end', 'msg_number': k}
             det_socket.send_json(dct_last)
-            print(f'Finished at time {time.strftime("%H:%M:%S", time.localtime())}, sending all messages took {time.time()-t1} s.')
+            print(f'Finished at time {time.strftime("%H:%M:%S", time.localtime())}, sending all messages took {(time.perf_counter_ns()-t1)*10**(-9)} s.')
             break
     except KeyboardInterrupt:
         print(f'i = {i}\nKeyboardInterrupt at time {time.strftime("%H:%M:%S", time.localtime())}\n')
