@@ -3,7 +3,7 @@
 Intended to be used together with 
 https://github.com/ptycho/ptypy/tree/livescan_maxiv  
 
-Example usage:
+Example usage of the RelayServer for simulating an ongoing experiment:
 
 $ input='{"sleeptime": "0.7125", "scan_file": "/your/path/scan_000026_eiger1m.hdf5", "path_to_data": "/entry/instrument/Eiger/data", "detector": "eiger1m"}'
 <br>
